@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import ThinkBarCore
 
 @main
 struct ThinkBarApp: App {
