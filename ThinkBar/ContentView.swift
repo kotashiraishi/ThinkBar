@@ -6,19 +6,36 @@
 //
 
 import SwiftUI
+import ThinkBarCore
 
 struct ContentView: View {
+    let provider: any AIProvider
+
+    @State private var input = ""
+    @State private var responseText = ""
+
     var body: some View {
         VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+            TextField("Prompt", text: $input)
+                .onSubmit {
+                    Task { await send() }
+                }
+
+            Button("Send") {
+                Task { await send() }
+            }
+
+            Text(responseText)
         }
         .padding()
+    }
+
+    private func send() async {
+        let response = try? await provider.ask(Prompt(text: input))
+        responseText = response?.text ?? ""
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(provider: FakeAIProvider())
 }

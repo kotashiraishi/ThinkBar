@@ -12,7 +12,7 @@ import ThinkBarCore
 struct ThinkBarApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(provider: FakeAIProvider())
         }
     }
 }
