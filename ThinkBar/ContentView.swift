@@ -13,15 +13,28 @@ struct ContentView: View {
 
     @State private var input = ""
     @State private var responseText = ""
+    @State private var isSending = false
+    @FocusState private var isInputFocused: Bool
 
     var body: some View {
         VStack {
             TextEditor(text: $input)
                 .frame(height: 44)
+                .focused($isInputFocused)
+                .disabled(isSending)
+                .onKeyPress(keys: [.return]) { keyPress in
+                    guard !keyPress.modifiers.contains(.shift) else {
+                        return .ignored
+                    }
+
+                    Task { await send() }
+                    return .handled
+                }
 
             Button("Send") {
                 Task { await send() }
             }
+            .disabled(isSending)
 
             Text(responseText)
         }
@@ -29,8 +42,20 @@ struct ContentView: View {
     }
 
     private func send() async {
-        let response = try? await provider.ask(Prompt(text: input))
-        responseText = response?.text ?? ""
+        guard !isSending else { return }
+
+        isSending = true
+
+        do {
+            let response = try await provider.ask(Prompt(text: input))
+            responseText = response.text
+            input = ""
+        } catch {
+            // Keep the input unchanged so the user can retry.
+        }
+
+        isSending = false
+        isInputFocused = true
     }
 }
 
