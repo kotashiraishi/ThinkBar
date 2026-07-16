@@ -16,10 +16,8 @@ struct ContentView: View {
 
     var body: some View {
         VStack {
-            TextField("Prompt", text: $input)
-                .onSubmit {
-                    Task { await send() }
-                }
+            TextEditor(text: $input)
+                .frame(height: 44)
 
             Button("Send") {
                 Task { await send() }
