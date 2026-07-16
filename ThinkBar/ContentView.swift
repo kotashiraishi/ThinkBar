@@ -22,14 +22,6 @@ struct ContentView: View {
                 .frame(height: 44)
                 .focused($isInputFocused)
                 .disabled(isSending)
-                .onKeyPress(keys: [.return]) { keyPress in
-                    guard !keyPress.modifiers.contains(.shift) else {
-                        return .ignored
-                    }
-
-                    Task { await send() }
-                    return .handled
-                }
 
             Button("Send") {
                 Task { await send() }
