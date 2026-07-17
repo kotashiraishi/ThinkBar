@@ -50,10 +50,20 @@ struct ContentView: View {
             }
 
             ScrollView {
-                Text(responseText)
+                if isSending {
+                    HStack {
+                        ProgressView()
+                        Text("Thinking...")
+                    }
                     .font(.title3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
+                } else {
+                    Text(responseText)
+                        .font(.title3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
             }
             .frame(maxHeight: .infinity)
             .background {
@@ -72,14 +82,14 @@ struct ContentView: View {
         guard !isSending else { return }
 
         lastPrompt = input
+        input = ""
         isSending = true
 
         do {
-            let response = try await provider.ask(Prompt(text: input))
+            let response = try await provider.ask(Prompt(text: lastPrompt))
             responseText = response.text
-            input = ""
         } catch {
-            // Keep the input unchanged so the user can retry.
+            input = lastPrompt
         }
 
         isSending = false
