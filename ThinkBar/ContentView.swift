@@ -50,30 +50,39 @@ struct ContentView: View {
                 }
             }
 
-            ScrollView {
-                if isThinking {
-                    HStack {
-                        ProgressView()
-                        Text("Thinking...")
-                    }
-                    .font(.title3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                } else {
-                    Text(responseText)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    if isThinking {
+                        HStack {
+                            ProgressView()
+                            Text("Thinking...")
+                        }
                         .font(.title3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
+                    } else {
+                        Text(responseText)
+                            .font(.title3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("responseBottom")
                 }
-            }
-            .frame(maxHeight: .infinity)
-            .background {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.secondary.opacity(0.08))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.2))
+                .onChange(of: responseText) {
+                    proxy.scrollTo("responseBottom", anchor: .bottom)
+                }
+                .frame(maxHeight: .infinity)
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.08))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.2))
+                }
             }
         }
         .padding()
