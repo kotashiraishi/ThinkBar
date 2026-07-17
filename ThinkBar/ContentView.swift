@@ -12,6 +12,7 @@ struct ContentView: View {
     let provider: any AIProvider
 
     @State private var input = ""
+    @State private var lastPrompt = ""
     @State private var responseText = ""
     @State private var isSending = false
     @FocusState private var isInputFocused: Bool
@@ -28,6 +29,25 @@ struct ContentView: View {
                 Task { await send() }
             }
             .disabled(isSending)
+
+            if !lastPrompt.isEmpty {
+                VStack(alignment: .leading) {
+                    Text("You")
+                        .foregroundStyle(.secondary)
+                    Text(lastPrompt)
+                        .font(.title3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.secondary.opacity(0.08))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.2))
+                }
+            }
 
             ScrollView {
                 Text(responseText)
@@ -51,6 +71,7 @@ struct ContentView: View {
     private func send() async {
         guard !isSending else { return }
 
+        lastPrompt = input
         isSending = true
 
         do {
