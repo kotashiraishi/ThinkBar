@@ -19,6 +19,7 @@ struct ContentView: View {
     var body: some View {
         VStack {
             TextEditor(text: $input)
+                .font(.title3)
                 .frame(height: 44)
                 .focused($isInputFocused)
                 .disabled(isSending)
@@ -28,7 +29,21 @@ struct ContentView: View {
             }
             .disabled(isSending)
 
-            Text(responseText)
+            ScrollView {
+                Text(responseText)
+                    .font(.title3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+            }
+            .frame(maxHeight: .infinity)
+            .background {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.08))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.2))
+            }
         }
         .padding()
     }
