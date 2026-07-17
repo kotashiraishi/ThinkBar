@@ -33,6 +33,40 @@ public struct OllamaProvider: AIProvider {
         let result = try JSONDecoder().decode(ResponseBody.self, from: data)
         return Response(text: result.response)
     }
+
+    public func stream(
+        _ prompt: Prompt,
+        onChunk: @escaping @Sendable (String) async -> Void
+    ) async throws {
+        let body = RequestBody(
+            model: model,
+            prompt: prompt.text,
+            stream: true
+        )
+
+        var request = URLRequest(
+            url: baseURL.appendingPathComponent("api/generate")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (bytes, _) = try await session.bytes(for: request)
+
+        for try await line in bytes.lines {
+            let result = try JSONDecoder().decode(
+                StreamResponseBody.self,
+                from: Data(line.utf8)
+            )
+
+            if !result.response.isEmpty {
+                await onChunk(result.response)
+            }
+            if result.done {
+                break
+            }
+        }
+    }
 }
 
 private struct RequestBody: Encodable {
@@ -43,4 +77,9 @@ private struct RequestBody: Encodable {
 
 private struct ResponseBody: Decodable {
     let response: String
+}
+
+private struct StreamResponseBody: Decodable {
+    let response: String
+    let done: Bool
 }

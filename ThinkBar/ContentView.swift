@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var lastPrompt = ""
     @State private var responseText = ""
     @State private var isSending = false
+    @State private var isThinking = false
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
@@ -50,7 +51,7 @@ struct ContentView: View {
             }
 
             ScrollView {
-                if isSending {
+                if isThinking {
                     HStack {
                         ProgressView()
                         Text("Thinking...")
@@ -83,15 +84,27 @@ struct ContentView: View {
 
         lastPrompt = input
         input = ""
+        responseText = ""
         isSending = true
+        isThinking = true
 
         do {
-            let response = try await provider.ask(Prompt(text: lastPrompt))
-            responseText = response.text
+            if let ollamaProvider = provider as? OllamaProvider {
+                try await ollamaProvider.stream(Prompt(text: lastPrompt)) { chunk in
+                    await MainActor.run {
+                        isThinking = false
+                        responseText += chunk
+                    }
+                }
+            } else {
+                let response = try await provider.ask(Prompt(text: lastPrompt))
+                responseText = response.text
+            }
         } catch {
             input = lastPrompt
         }
 
+        isThinking = false
         isSending = false
         isInputFocused = true
     }
