@@ -99,11 +99,36 @@ struct ContentView: View {
 
         do {
             if let ollamaProvider = provider as? OllamaProvider {
-                try await ollamaProvider.stream(Prompt(text: lastPrompt)) { chunk in
-                    await MainActor.run {
-                        isThinking = false
-                        responseText += chunk
+                let buffer = StreamBuffer()
+                let updateTask = Task { @MainActor in
+                    while !Task.isCancelled {
+                        try await Task.sleep(for: .milliseconds(75))
+                        let bufferedText = await buffer.drain()
+
+                        if !bufferedText.isEmpty {
+                            isThinking = false
+                            responseText += bufferedText
+                        }
                     }
+                }
+
+                do {
+                    try await ollamaProvider.stream(Prompt(text: lastPrompt)) { chunk in
+                        await buffer.append(chunk)
+                    }
+                } catch {
+                    updateTask.cancel()
+                    try? await updateTask.value
+                    throw error
+                }
+
+                updateTask.cancel()
+                try? await updateTask.value
+
+                let remainingText = await buffer.drain()
+                if !remainingText.isEmpty {
+                    isThinking = false
+                    responseText += remainingText
                 }
             } else {
                 let response = try await provider.ask(Prompt(text: lastPrompt))
@@ -121,4 +146,17 @@ struct ContentView: View {
 
 #Preview {
     ContentView(provider: FakeAIProvider())
+}
+
+private actor StreamBuffer {
+    private var text = ""
+
+    func append(_ chunk: String) {
+        text += chunk
+    }
+
+    func drain() -> String {
+        defer { text = "" }
+        return text
+    }
 }
