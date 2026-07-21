@@ -63,6 +63,7 @@ struct ContentView: View {
                     } else {
                         Text(responseText)
                             .font(.title3)
+                            .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
                     }
