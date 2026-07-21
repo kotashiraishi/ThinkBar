@@ -87,6 +87,9 @@ struct ContentView: View {
             }
         }
         .padding()
+        .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
+            isInputFocused = true
+        }
     }
 
     private func send() async {
