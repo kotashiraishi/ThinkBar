@@ -38,9 +38,24 @@ public struct OllamaProvider: AIProvider {
         _ prompt: Prompt,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
+        try await stream(promptText: prompt.text, onChunk: onChunk)
+    }
+
+    public func stream(
+        conversationHistory: [(user: String, assistant: String)],
+        onChunk: @escaping @Sendable (String) async -> Void
+    ) async throws {
+        let promptText = conversationPrompt(from: conversationHistory)
+        try await stream(promptText: promptText, onChunk: onChunk)
+    }
+
+    private func stream(
+        promptText: String,
+        onChunk: @escaping @Sendable (String) async -> Void
+    ) async throws {
         let body = RequestBody(
             model: model,
-            prompt: prompt.text,
+            prompt: promptText,
             stream: true
         )
 
@@ -66,6 +81,22 @@ public struct OllamaProvider: AIProvider {
                 break
             }
         }
+    }
+
+    private func conversationPrompt(
+        from history: [(user: String, assistant: String)]
+    ) -> String {
+        var lines: [String] = []
+
+        for turn in history.suffix(5) {
+            lines.append("User: \(turn.user)")
+            if !turn.assistant.isEmpty {
+                lines.append("Assistant: \(turn.assistant)")
+            }
+        }
+
+        lines.append("Assistant:")
+        return lines.joined(separator: "\n")
     }
 }
 

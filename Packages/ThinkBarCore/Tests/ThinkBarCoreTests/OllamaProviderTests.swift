@@ -33,13 +33,25 @@ struct OllamaProviderTests {
         #expect(response.text == "こんにちは！")
     }
 
-    @Test func streamDeliversEachResponseChunkUntilDone() async throws {
+    @Test func conversationStreamUsesFiveRecentTurnsAndDeliversChunks() async throws {
         let session = makeSession()
 
         MockURLProtocol.handler = { request in
             let data = try requestBody(from: request)
             let body = try JSONDecoder().decode(OllamaRequestBody.self, from: data)
             #expect(body.stream)
+            #expect(body.prompt == """
+            User: user2
+            Assistant: assistant2
+            User: user3
+            Assistant: assistant3
+            User: user4
+            Assistant: assistant4
+            User: user5
+            Assistant: assistant5
+            User: user6
+            Assistant:
+            """)
 
             let lines = """
             {"response":"こん","done":false}
@@ -53,8 +65,16 @@ struct OllamaProviderTests {
 
         let collector = ChunkCollector()
         let provider = makeProvider(session: session)
+        let history = [
+            (user: "user1", assistant: "assistant1"),
+            (user: "user2", assistant: "assistant2"),
+            (user: "user3", assistant: "assistant3"),
+            (user: "user4", assistant: "assistant4"),
+            (user: "user5", assistant: "assistant5"),
+            (user: "user6", assistant: ""),
+        ]
 
-        try await provider.stream(Prompt(text: "こんにちは")) { chunk in
+        try await provider.stream(conversationHistory: history) { chunk in
             await collector.append(chunk)
         }
 

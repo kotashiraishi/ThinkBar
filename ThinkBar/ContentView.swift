@@ -12,8 +12,7 @@ struct ContentView: View {
     let provider: any AIProvider
 
     @State private var input = ""
-    @State private var lastPrompt = ""
-    @State private var responseText = ""
+    @State private var conversations: [Conversation] = []
     @State private var isSending = false
     @State private var isThinking = false
     @FocusState private var isInputFocused: Bool
@@ -31,48 +30,57 @@ struct ContentView: View {
             }
             .disabled(isSending)
 
-            if !lastPrompt.isEmpty {
-                VStack(alignment: .leading) {
-                    Text("You")
-                        .foregroundStyle(.secondary)
-                    Text(lastPrompt)
-                        .font(.title3)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .background {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.08))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.2))
-                }
-            }
-
             ScrollViewReader { proxy in
                 ScrollView {
-                    if isThinking {
-                        HStack {
-                            ProgressView()
-                            Text("Thinking...")
-                        }
-                        .font(.title3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                    } else {
-                        Text(responseText)
-                            .font(.title3)
-                            .textSelection(.enabled)
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(conversations) { conversation in
+                            VStack(alignment: .leading) {
+                                Text("User")
+                                    .foregroundStyle(.secondary)
+                                Text(conversation.user)
+                                    .font(.title3)
+                                    .textSelection(.enabled)
+                            }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
-                    }
+                            .background {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.secondary.opacity(0.08))
+                            }
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id("responseBottom")
+                            VStack(alignment: .leading) {
+                                Text("Assistant")
+                                    .foregroundStyle(.secondary)
+
+                                if isThinking && conversation.id == conversations.last?.id {
+                                    HStack {
+                                        ProgressView()
+                                        Text("Thinking...")
+                                    }
+                                    .font(.title3)
+                                } else {
+                                    Text(conversation.assistant)
+                                        .font(.title3)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .background {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color.accentColor.opacity(0.08))
+                            }
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("responseBottom")
+                    }
                 }
-                .onChange(of: responseText) {
+                .onChange(of: conversations.count) {
+                    proxy.scrollTo("responseBottom", anchor: .bottom)
+                }
+                .onChange(of: conversations.last?.assistant) {
                     proxy.scrollTo("responseBottom", anchor: .bottom)
                 }
                 .frame(maxHeight: .infinity)
@@ -95,9 +103,10 @@ struct ContentView: View {
     private func send() async {
         guard !isSending else { return }
 
-        lastPrompt = input
+        let prompt = input
+        let conversation = Conversation(user: prompt)
+        conversations.append(conversation)
         input = ""
-        responseText = ""
         isSending = true
         isThinking = true
 
@@ -111,13 +120,16 @@ struct ContentView: View {
 
                         if !bufferedText.isEmpty {
                             isThinking = false
-                            responseText += bufferedText
+                            append(bufferedText, to: conversation.id)
                         }
                     }
                 }
 
                 do {
-                    try await ollamaProvider.stream(Prompt(text: lastPrompt)) { chunk in
+                    let history = conversations.map {
+                        (user: $0.user, assistant: $0.assistant)
+                    }
+                    try await ollamaProvider.stream(conversationHistory: history) { chunk in
                         await buffer.append(chunk)
                     }
                 } catch {
@@ -132,24 +144,42 @@ struct ContentView: View {
                 let remainingText = await buffer.drain()
                 if !remainingText.isEmpty {
                     isThinking = false
-                    responseText += remainingText
+                    append(remainingText, to: conversation.id)
                 }
             } else {
-                let response = try await provider.ask(Prompt(text: lastPrompt))
-                responseText = response.text
+                let response = try await provider.ask(Prompt(text: prompt))
+                append(response.text, to: conversation.id)
             }
         } catch {
-            input = lastPrompt
+            input = prompt
+            if conversations.last?.id == conversation.id {
+                conversations.removeLast()
+            }
         }
 
         isThinking = false
         isSending = false
         isInputFocused = true
     }
+
+    private func append(_ text: String, to conversationID: UUID) {
+        guard
+            let index = conversations.indices.last,
+            conversations[index].id == conversationID
+        else { return }
+
+        conversations[index].assistant += text
+    }
 }
 
 #Preview {
     ContentView(provider: FakeAIProvider())
+}
+
+private struct Conversation: Identifiable {
+    let id = UUID()
+    let user: String
+    var assistant = ""
 }
 
 private actor StreamBuffer {
