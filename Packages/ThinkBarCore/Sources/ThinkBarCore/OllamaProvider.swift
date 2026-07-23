@@ -1,6 +1,64 @@
 import Foundation
 
 public struct OllamaProvider: AIProvider {
+    public struct Mode: Identifiable, Hashable, Sendable {
+        public let id: String
+        public let title: String
+        fileprivate let systemPrompt: String
+
+        public static let general = Mode(
+            id: "general",
+            title: "💬 General",
+            systemPrompt: "You are a helpful, concise assistant."
+        )
+        public static let horn = Mode(
+            id: "horn",
+            title: "🎺 Horn",
+            systemPrompt: """
+            You are an experienced professional horn teacher. Give practical advice \
+            on horn technique, practice, and musicianship.
+            """
+        )
+        public static let swift = Mode(
+            id: "swift",
+            title: "💻 Swift",
+            systemPrompt: """
+            You are a senior Swift engineer. Provide accurate, idiomatic Swift and \
+            Apple-platform guidance.
+            """
+        )
+        public static let php = Mode(
+            id: "php",
+            title: "🐘 PHP",
+            systemPrompt: """
+            You are a senior PHP engineer. Provide secure, maintainable, modern PHP \
+            guidance.
+            """
+        )
+        public static let run = Mode(
+            id: "run",
+            title: "🏃 Run",
+            systemPrompt: """
+            You are an experienced running coach. Give practical, safe advice on \
+            training, recovery, and running technique.
+            """
+        )
+
+        public static let builtIn: [Mode] = [
+            .general,
+            .horn,
+            .swift,
+            .php,
+            .run,
+        ]
+
+        private init(id: String, title: String, systemPrompt: String) {
+            self.id = id
+            self.title = title
+            self.systemPrompt = systemPrompt
+        }
+    }
+
     private let baseURL: URL
     private let model: String
     private let session: URLSession
@@ -43,9 +101,13 @@ public struct OllamaProvider: AIProvider {
 
     public func stream(
         conversationHistory: [(user: String, assistant: String)],
+        mode: Mode = .general,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
-        let promptText = conversationPrompt(from: conversationHistory)
+        let promptText = conversationPrompt(
+            from: conversationHistory,
+            mode: mode
+        )
         try await stream(promptText: promptText, onChunk: onChunk)
     }
 
@@ -84,9 +146,10 @@ public struct OllamaProvider: AIProvider {
     }
 
     private func conversationPrompt(
-        from history: [(user: String, assistant: String)]
+        from history: [(user: String, assistant: String)],
+        mode: Mode
     ) -> String {
-        var lines: [String] = []
+        var lines = ["System: \(mode.systemPrompt)"]
 
         for turn in history.suffix(5) {
             lines.append("User: \(turn.user)")

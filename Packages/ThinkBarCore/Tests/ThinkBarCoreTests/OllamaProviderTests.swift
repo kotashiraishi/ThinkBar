@@ -4,6 +4,16 @@ import Testing
 
 @Suite(.serialized)
 struct OllamaProviderTests {
+    @Test func builtInModesAreAvailable() {
+        #expect(OllamaProvider.Mode.builtIn.map(\.title) == [
+            "💬 General",
+            "🎺 Horn",
+            "💻 Swift",
+            "🐘 PHP",
+            "🏃 Run",
+        ])
+    }
+
     @Test func askSendsPromptAndReturnsGeneratedText() async throws {
         let session = makeSession()
 
@@ -41,6 +51,7 @@ struct OllamaProviderTests {
             let body = try JSONDecoder().decode(OllamaRequestBody.self, from: data)
             #expect(body.stream)
             #expect(body.prompt == """
+            System: You are a senior Swift engineer. Provide accurate, idiomatic Swift and Apple-platform guidance.
             User: user2
             Assistant: assistant2
             User: user3
@@ -74,7 +85,10 @@ struct OllamaProviderTests {
             (user: "user6", assistant: ""),
         ]
 
-        try await provider.stream(conversationHistory: history) { chunk in
+        try await provider.stream(
+            conversationHistory: history,
+            mode: .swift
+        ) { chunk in
             await collector.append(chunk)
         }
 

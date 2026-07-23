@@ -15,10 +15,19 @@ struct ContentView: View {
     @State private var conversations: [Conversation] = []
     @State private var isSending = false
     @State private var isThinking = false
+    @State private var selectedMode = OllamaProvider.Mode.general
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
         VStack {
+            Picker("Mode", selection: $selectedMode) {
+                ForEach(OllamaProvider.Mode.builtIn) { mode in
+                    Text(mode.title)
+                        .tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
             TextEditor(text: $input)
                 .font(.title3)
                 .frame(height: 44)
@@ -104,6 +113,7 @@ struct ContentView: View {
         guard !isSending else { return }
 
         let prompt = input
+        let mode = selectedMode
         let conversation = Conversation(user: prompt)
         conversations.append(conversation)
         input = ""
@@ -129,7 +139,10 @@ struct ContentView: View {
                     let history = conversations.map {
                         (user: $0.user, assistant: $0.assistant)
                     }
-                    try await ollamaProvider.stream(conversationHistory: history) { chunk in
+                    try await ollamaProvider.stream(
+                        conversationHistory: history,
+                        mode: mode
+                    ) { chunk in
                         await buffer.append(chunk)
                     }
                 } catch {
