@@ -5,6 +5,7 @@
 //  Created by Kota Shiraishi on 2026/07/13.
 //
 
+import Foundation
 import SwiftUI
 import ThinkBarCore
 
@@ -67,6 +68,10 @@ struct ContentView: View {
                                         Text("Thinking...")
                                     }
                                     .font(.title3)
+                                } else if let renderedAssistant = conversation.renderedAssistant {
+                                    Text(renderedAssistant)
+                                        .font(.title3)
+                                        .textSelection(.enabled)
                                 } else {
                                     Text(conversation.assistant)
                                         .font(.title3)
@@ -163,6 +168,8 @@ struct ContentView: View {
                 let response = try await provider.ask(Prompt(text: prompt))
                 append(response.text, to: conversation.id)
             }
+
+            renderMarkdown(for: conversation.id)
         } catch {
             input = prompt
             if conversations.last?.id == conversation.id {
@@ -183,6 +190,17 @@ struct ContentView: View {
 
         conversations[index].assistant += text
     }
+
+    private func renderMarkdown(for conversationID: UUID) {
+        guard
+            let index = conversations.indices.last,
+            conversations[index].id == conversationID
+        else { return }
+
+        conversations[index].renderedAssistant = try? AttributedString(
+            markdown: conversations[index].assistant
+        )
+    }
 }
 
 #Preview {
@@ -193,6 +211,7 @@ private struct Conversation: Identifiable {
     let id = UUID()
     let user: String
     var assistant = ""
+    var renderedAssistant: AttributedString?
 }
 
 private actor StreamBuffer {
