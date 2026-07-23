@@ -52,6 +52,8 @@ struct OllamaProviderTests {
             #expect(body.stream)
             #expect(body.prompt == """
             System: You are a senior Swift engineer. Provide accurate, idiomatic Swift and Apple-platform guidance.
+            Answer in the same language as the user's latest message.
+            Do not switch languages unless the user explicitly requests it.
             User: user2
             Assistant: assistant2
             User: user3

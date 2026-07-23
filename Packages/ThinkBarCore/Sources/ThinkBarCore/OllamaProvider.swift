@@ -1,6 +1,11 @@
 import Foundation
 
 public struct OllamaProvider: AIProvider {
+    private static let languageInstruction = """
+    Answer in the same language as the user's latest message.
+    Do not switch languages unless the user explicitly requests it.
+    """
+
     public struct Mode: Identifiable, Hashable, Sendable {
         public let id: String
         public let title: String
@@ -149,7 +154,12 @@ public struct OllamaProvider: AIProvider {
         from history: [(user: String, assistant: String)],
         mode: Mode
     ) -> String {
-        var lines = ["System: \(mode.systemPrompt)"]
+        var lines = [
+            """
+            System: \(mode.systemPrompt)
+            \(Self.languageInstruction)
+            """
+        ]
 
         for turn in history.suffix(5) {
             lines.append("User: \(turn.user)")
