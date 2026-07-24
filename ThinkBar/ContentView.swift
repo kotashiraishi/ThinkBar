@@ -93,8 +93,19 @@ struct ContentView: View {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(conversations) { conversation in
                             VStack(alignment: .leading) {
-                                Text("User")
-                                    .foregroundStyle(.secondary)
+                                HStack {
+                                    Text("User")
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button {
+                                        edit(conversation.user)
+                                    } label: {
+                                        Image(systemName: "pencil")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(isSending)
+                                    .accessibilityLabel("Edit message")
+                                }
                                 Text(conversation.user)
                                     .font(.title3)
                                     .textSelection(.enabled)
@@ -239,6 +250,13 @@ struct ContentView: View {
 
         isThinking = false
         isSending = false
+        isInputFocused = true
+    }
+
+    private func edit(_ message: String) {
+        guard !isSending else { return }
+
+        input = message
         isInputFocused = true
     }
 
