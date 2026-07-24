@@ -5,14 +5,22 @@
 //  Created by Kota Shiraishi on 2026/07/13.
 //
 
+import AppKit
 import Foundation
 import SwiftUI
 import ThinkBarCore
 
 struct ContentView: View {
+    private static let supportedAttachmentExtensions: Set<String> = [
+        "txt", "md", "swift", "php", "json", "log", "yaml", "yml", "xml",
+    ]
+
     let provider: any AIProvider
 
     @State private var input = ""
+    @State private var attachments: [Attachment] = []
+    @State private var imageAttachments: [ImageAttachment] = []
+    @State private var attachmentError: String?
     @State private var conversations: [Conversation] = []
     @State private var isSending = false
     @State private var isThinking = false
@@ -29,11 +37,51 @@ struct ContentView: View {
             }
             .pickerStyle(.segmented)
 
+            ForEach(attachments) { attachment in
+                HStack {
+                    Text("📎 \(attachment.fileName)")
+                    Spacer()
+                    Button {
+                        attachments.removeAll { $0.id == attachment.id }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSending)
+                    .accessibilityLabel("Remove \(attachment.fileName)")
+                }
+            }
+
+            ForEach(imageAttachments) { imageAttachment in
+                HStack {
+                    Text("🖼 Screenshot")
+                    Spacer()
+                    Button {
+                        imageAttachments.removeAll { $0.id == imageAttachment.id }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSending)
+                    .accessibilityLabel("Remove screenshot")
+                }
+            }
+
+            if let attachmentError {
+                Text(attachmentError)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             TextEditor(text: $input)
                 .font(.title3)
                 .frame(height: 44)
                 .focused($isInputFocused)
                 .disabled(isSending)
+                .onKeyPress(keys: ["v"]) { keyPress in
+                    guard keyPress.modifiers.contains(.command) else { return .ignored }
+                    return pasteImageFromClipboard() ? .handled : .ignored
+                }
 
             Button("Send") {
                 Task { await send() }
@@ -109,6 +157,10 @@ struct ContentView: View {
             }
         }
         .padding()
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { urls, _ in
+            loadAttachment(from: urls.first)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
             isInputFocused = true
         }
@@ -119,7 +171,12 @@ struct ContentView: View {
 
         let prompt = input
         let mode = selectedMode
-        let conversation = Conversation(user: prompt)
+        let requestPrompt = requestPrompt(
+            for: prompt,
+            attachment: attachments.first,
+            imageAttachment: imageAttachments.first
+        )
+        let conversation = Conversation(user: prompt, request: requestPrompt)
         conversations.append(conversation)
         input = ""
         isSending = true
@@ -142,7 +199,7 @@ struct ContentView: View {
 
                 do {
                     let history = conversations.map {
-                        (user: $0.user, assistant: $0.assistant)
+                        (user: $0.request, assistant: $0.assistant)
                     }
                     try await ollamaProvider.stream(
                         conversationHistory: history,
@@ -165,11 +222,14 @@ struct ContentView: View {
                     append(remainingText, to: conversation.id)
                 }
             } else {
-                let response = try await provider.ask(Prompt(text: prompt))
+                let response = try await provider.ask(Prompt(text: requestPrompt))
                 append(response.text, to: conversation.id)
             }
 
             renderMarkdown(for: conversation.id)
+            attachments.removeAll()
+            imageAttachments.removeAll()
+            attachmentError = nil
         } catch {
             input = prompt
             if conversations.last?.id == conversation.id {
@@ -180,6 +240,65 @@ struct ContentView: View {
         isThinking = false
         isSending = false
         isInputFocused = true
+    }
+
+    private func loadAttachment(from url: URL?) {
+        guard !isSending, let url, url.isFileURL else { return }
+
+        guard Self.supportedAttachmentExtensions.contains(url.pathExtension.lowercased()) else {
+            attachmentError = "Unsupported file type: \(url.lastPathComponent)"
+            return
+        }
+
+        do {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            attachments = [
+                Attachment(fileName: url.lastPathComponent, content: content)
+            ]
+            attachmentError = nil
+        } catch {
+            attachmentError = "Could not read \(url.lastPathComponent) as UTF-8."
+        }
+    }
+
+    private func pasteImageFromClipboard() -> Bool {
+        guard
+            !isSending,
+            let image = NSImage(pasteboard: .general)
+        else { return false }
+
+        imageAttachments = [ImageAttachment(image: image)]
+        return true
+    }
+
+    private func requestPrompt(
+        for question: String,
+        attachment: Attachment?,
+        imageAttachment: ImageAttachment?
+    ) -> String {
+        var context = ""
+
+        if let attachment {
+            context += """
+            Attachment: \(attachment.fileName)
+
+            \(attachment.content)
+
+            ---
+
+            """
+        }
+
+        if imageAttachment != nil {
+            context += """
+            Image attached:
+            Screenshot
+
+            """
+        }
+
+        guard !context.isEmpty else { return question }
+        return "\(context)Question:\n\(question)"
     }
 
     private func append(_ text: String, to conversationID: UUID) {
@@ -210,6 +329,7 @@ struct ContentView: View {
 private struct Conversation: Identifiable {
     let id = UUID()
     let user: String
+    let request: String
     var assistant = ""
     var renderedAssistant: AttributedString?
 }
