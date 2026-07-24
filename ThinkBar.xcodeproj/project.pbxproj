@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		12A62A523004BC860053FF30 /* ThinkBarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 12A62A513004BC860053FF30 /* ThinkBarCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		12A62A273004BC860053FF30 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -22,10 +26,6 @@
 			remoteInfo = ThinkBar;
 		};
 /* End PBXContainerItemProxy section */
-
-/* Begin PBXBuildFile section */
-		12A62A523004BC860053FF30 /* ThinkBarCore in Frameworks */ = {isa = PBXBuildFile; productRef = 12A62A513004BC860053FF30 /* ThinkBarCore */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		12A62A193004BC850053FF30 /* ThinkBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThinkBar.app; sourceTree = BUILT_PRODUCTS_DIR; };

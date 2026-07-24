@@ -334,9 +334,19 @@ struct ContentView: View {
             conversations[index].id == conversationID
         else { return }
 
+        let text = conversations[index].assistant
+        guard shouldRenderMarkdown(text) else {
+            conversations[index].renderedAssistant = nil
+            return
+        }
+
         conversations[index].renderedAssistant = try? AttributedString(
-            markdown: conversations[index].assistant
+            markdown: text
         )
+    }
+
+    private func shouldRenderMarkdown(_ text: String) -> Bool {
+        text.contains("```")
     }
 }
 
