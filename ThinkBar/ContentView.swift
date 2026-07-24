@@ -25,7 +25,7 @@ struct ContentView: View {
     @State private var isSending = false
     @State private var isThinking = false
     @State private var selectedMode = OllamaProvider.Mode.general
-    @FocusState private var isInputFocused: Bool
+    @State private var inputFocusRequest = 0
 
     var body: some View {
         VStack {
@@ -73,15 +73,16 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            TextEditor(text: $input)
-                .font(.title3)
+            IMESafeTextEditor(
+                text: $input,
+                isEnabled: !isSending,
+                focusRequest: inputFocusRequest,
+                onSend: {
+                    Task { await send() }
+                },
+                onPasteImage: pasteImageFromClipboard
+            )
                 .frame(height: 44)
-                .focused($isInputFocused)
-                .disabled(isSending)
-                .onKeyPress(keys: ["v"]) { keyPress in
-                    guard keyPress.modifiers.contains(.command) else { return .ignored }
-                    return pasteImageFromClipboard() ? .handled : .ignored
-                }
 
             Button("Send") {
                 Task { await send() }
@@ -173,7 +174,7 @@ struct ContentView: View {
             loadAttachment(from: urls.first)
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
-            isInputFocused = true
+            focusInput()
         }
     }
 
@@ -250,14 +251,18 @@ struct ContentView: View {
 
         isThinking = false
         isSending = false
-        isInputFocused = true
+        focusInput()
     }
 
     private func edit(_ message: String) {
         guard !isSending else { return }
 
         input = message
-        isInputFocused = true
+        focusInput()
+    }
+
+    private func focusInput() {
+        inputFocusRequest += 1
     }
 
     private func loadAttachment(from url: URL?) {
@@ -347,6 +352,102 @@ struct ContentView: View {
 
     private func shouldRenderMarkdown(_ text: String) -> Bool {
         text.contains("```")
+    }
+}
+
+private struct IMESafeTextEditor: NSViewRepresentable {
+    @Binding var text: String
+
+    let isEnabled: Bool
+    let focusRequest: Int
+    let onSend: () -> Void
+    let onPasteImage: () -> Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = SendingTextView()
+        textView.delegate = context.coordinator
+        textView.font = .systemFont(ofSize: 20)
+        textView.isRichText = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainerInset = NSSize(width: 4, height: 8)
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? SendingTextView else { return }
+
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.isEditable = isEnabled
+        textView.onSend = onSend
+        textView.onPasteImage = onPasteImage
+
+        if context.coordinator.lastFocusRequest != focusRequest {
+            context.coordinator.lastFocusRequest = focusRequest
+            scrollView.window?.makeFirstResponder(textView)
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        private var text: Binding<String>
+        var lastFocusRequest: Int?
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text.wrappedValue = textView.string
+        }
+    }
+}
+
+private final class SendingTextView: NSTextView {
+    private static let returnKeyCode: UInt16 = 36
+    private static let keypadEnterKeyCode: UInt16 = 76
+
+    var onSend: (() -> Void)?
+    var onPasteImage: (() -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        let isEnter = event.keyCode == Self.returnKeyCode
+            || event.keyCode == Self.keypadEnterKeyCode
+        guard isEnter, !hasMarkedText() else {
+            super.keyDown(with: event)
+            return
+        }
+
+        let modifiers = event.modifierFlags.intersection([
+            .command, .control, .option, .shift,
+        ])
+        if (modifiers.isEmpty || modifiers == .command), let onSend {
+            onSend()
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if onPasteImage?() == true {
+            return
+        }
+        super.paste(sender)
     }
 }
 
