@@ -9,7 +9,7 @@ public struct OllamaProvider: AIProvider {
     public struct Mode: Identifiable, Hashable, Sendable {
         public let id: String
         public let title: String
-        fileprivate let systemPrompt: String
+        let systemPrompt: String
 
         public static let general = Mode(
             id: "general",
