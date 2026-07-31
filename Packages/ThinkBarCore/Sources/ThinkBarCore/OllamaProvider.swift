@@ -14,7 +14,12 @@ public struct OllamaProvider: AIProvider {
         public static let general = Mode(
             id: "general",
             title: "💬 General",
-            systemPrompt: "You are a helpful, concise assistant."
+            systemPrompt: """
+            You are a helpful assistant. \
+            Give direct, practical, and accurate answers. \
+            Be concise by default, but provide more detail when the user's question requires it. \
+            Do not unnecessarily repeat or paraphrase the user's question.
+            """
         )
         public static let horn = Mode(
             id: "horn",
@@ -81,12 +86,14 @@ public struct OllamaProvider: AIProvider {
     public func ask(_ prompt: Prompt) async throws -> Response {
         let body = RequestBody(
             model: model,
-            prompt: prompt.text,
+            messages: [
+                Message(role: "user", content: prompt.text),
+            ],
             stream: false
         )
 
         var request = URLRequest(
-            url: baseURL.appendingPathComponent("api/generate")
+            url: baseURL.appendingPathComponent("api/chat")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -94,14 +101,19 @@ public struct OllamaProvider: AIProvider {
 
         let (data, _) = try await session.data(for: request)
         let result = try JSONDecoder().decode(ResponseBody.self, from: data)
-        return Response(text: result.response)
+        return Response(text: result.message.content)
     }
 
     public func stream(
         _ prompt: Prompt,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
-        try await stream(promptText: prompt.text, onChunk: onChunk)
+        try await stream(
+            messages: [
+                Message(role: "user", content: prompt.text),
+            ],
+            onChunk: onChunk
+        )
     }
 
     public func stream(
@@ -109,25 +121,27 @@ public struct OllamaProvider: AIProvider {
         mode: Mode = .general,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
-        let promptText = conversationPrompt(
-            from: conversationHistory,
-            mode: mode
+        try await stream(
+            messages: conversationMessages(
+                from: conversationHistory,
+                mode: mode
+            ),
+            onChunk: onChunk
         )
-        try await stream(promptText: promptText, onChunk: onChunk)
     }
 
     private func stream(
-        promptText: String,
+        messages: [Message],
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
         let body = RequestBody(
             model: model,
-            prompt: promptText,
+            messages: messages,
             stream: true
         )
 
         var request = URLRequest(
-            url: baseURL.appendingPathComponent("api/generate")
+            url: baseURL.appendingPathComponent("api/chat")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -141,8 +155,8 @@ public struct OllamaProvider: AIProvider {
                 from: Data(line.utf8)
             )
 
-            if !result.response.isEmpty {
-                await onChunk(result.response)
+            if !result.message.content.isEmpty {
+                await onChunk(result.message.content)
             }
             if result.done {
                 break
@@ -150,40 +164,44 @@ public struct OllamaProvider: AIProvider {
         }
     }
 
-    private func conversationPrompt(
+    private func conversationMessages(
         from history: [(user: String, assistant: String)],
         mode: Mode
-    ) -> String {
-        var lines = [
-            """
-            System: \(mode.systemPrompt)
-            \(Self.languageInstruction)
-            """
+    ) -> [Message] {
+        var messages = [
+            Message(
+                role: "system",
+                content: "\(mode.systemPrompt)\n\(Self.languageInstruction)"
+            )
         ]
 
         for turn in history.suffix(5) {
-            lines.append("User: \(turn.user)")
+            messages.append(Message(role: "user", content: turn.user))
             if !turn.assistant.isEmpty {
-                lines.append("Assistant: \(turn.assistant)")
+                messages.append(Message(role: "assistant", content: turn.assistant))
             }
         }
-
-        lines.append("Assistant:")
-        return lines.joined(separator: "\n")
+        return messages
     }
 }
 
 private struct RequestBody: Encodable {
     let model: String
-    let prompt: String
+    let messages: [Message]
     let stream: Bool
 }
 
+private struct Message: Codable {
+    let role: String
+    let content: String
+}
+
 private struct ResponseBody: Decodable {
-    let response: String
+    let message: Message
 }
 
 private struct StreamResponseBody: Decodable {
-    let response: String
+    let message: Message
     let done: Bool
 }
+

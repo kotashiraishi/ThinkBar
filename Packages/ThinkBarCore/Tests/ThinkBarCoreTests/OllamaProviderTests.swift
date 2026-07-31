@@ -14,11 +14,48 @@ struct OllamaProviderTests {
         ])
     }
 
-    @Test func askSendsPromptAndReturnsGeneratedText() async throws {
+    @Test func eachBuiltInModeIsSentAsSystemMessage() async throws {
+        let session = makeSession()
+        let provider = makeProvider(session: session)
+        defer { MockURLProtocol.handler = nil }
+
+        for mode in OllamaProvider.Mode.builtIn {
+            MockURLProtocol.handler = { request in
+                let body = try JSONDecoder().decode(
+                    OllamaRequestBody.self,
+                    from: try requestBody(from: request)
+                )
+                #expect(body.messages.first == .init(
+                    role: "system",
+                    content: """
+                    \(mode.systemPrompt)
+                    Answer in the same language as the user's latest message.
+                    Do not switch languages unless the user explicitly requests it.
+                    """
+                ))
+
+                let line = """
+                {"message":{"role":"assistant","content":""},"done":true}
+
+                """
+                return try makeHTTPResponse(
+                    for: request,
+                    data: Data(line.utf8)
+                )
+            }
+
+            try await provider.stream(
+                conversationHistory: [(user: "Hello", assistant: "")],
+                mode: mode
+            ) { _ in }
+        }
+    }
+
+    @Test func askSendsChatMessageAndReturnsGeneratedText() async throws {
         let session = makeSession()
 
         MockURLProtocol.handler = { request in
-            #expect(request.url?.absoluteString == "http://localhost:11434/api/generate")
+            #expect(request.url?.absoluteString == "http://localhost:11434/api/chat")
             #expect(request.httpMethod == "POST")
             #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
 
@@ -26,13 +63,17 @@ struct OllamaProviderTests {
             let body = try JSONDecoder().decode(OllamaRequestBody.self, from: data)
             #expect(body == OllamaRequestBody(
                 model: "gemma3:4b",
-                prompt: "こんにちは",
+                messages: [
+                    .init(role: "user", content: "こんにちは"),
+                ],
                 stream: false
             ))
 
             return try makeHTTPResponse(
                 for: request,
-                data: Data(#"{"response":"こんにちは！"}"#.utf8)
+                data: Data(
+                    #"{"message":{"role":"assistant","content":"こんにちは！"}}"#.utf8
+                )
             )
         }
         defer { MockURLProtocol.handler = nil }
@@ -47,29 +88,34 @@ struct OllamaProviderTests {
         let session = makeSession()
 
         MockURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "http://localhost:11434/api/chat")
             let data = try requestBody(from: request)
             let body = try JSONDecoder().decode(OllamaRequestBody.self, from: data)
             #expect(body.stream)
-            #expect(body.prompt == """
-            System: You are a senior Swift engineer. Provide accurate, idiomatic Swift and Apple-platform guidance.
-            Answer in the same language as the user's latest message.
-            Do not switch languages unless the user explicitly requests it.
-            User: user2
-            Assistant: assistant2
-            User: user3
-            Assistant: assistant3
-            User: user4
-            Assistant: assistant4
-            User: user5
-            Assistant: assistant5
-            User: user6
-            Assistant:
-            """)
+            #expect(body.messages == [
+                .init(
+                    role: "system",
+                    content: """
+                    You are a senior Swift engineer. Provide accurate, idiomatic Swift and Apple-platform guidance.
+                    Answer in the same language as the user's latest message.
+                    Do not switch languages unless the user explicitly requests it.
+                    """
+                ),
+                .init(role: "user", content: "user2"),
+                .init(role: "assistant", content: "assistant2"),
+                .init(role: "user", content: "user3"),
+                .init(role: "assistant", content: "assistant3"),
+                .init(role: "user", content: "user4"),
+                .init(role: "assistant", content: "assistant4"),
+                .init(role: "user", content: "user5"),
+                .init(role: "assistant", content: "assistant5"),
+                .init(role: "user", content: "user6"),
+            ])
 
             let lines = """
-            {"response":"こん","done":false}
-            {"response":"にちは","done":false}
-            {"response":"","done":true}
+            {"message":{"role":"assistant","content":"こん"},"done":false}
+            {"message":{"role":"assistant","content":"にちは"},"done":false}
+            {"message":{"role":"assistant","content":""},"done":true}
 
             """
             return try makeHTTPResponse(for: request, data: Data(lines.utf8))
@@ -100,8 +146,13 @@ struct OllamaProviderTests {
 
 private struct OllamaRequestBody: Decodable, Equatable {
     let model: String
-    let prompt: String
+    let messages: [OllamaMessage]
     let stream: Bool
+}
+
+private struct OllamaMessage: Decodable, Equatable {
+    let role: String
+    let content: String
 }
 
 private func makeSession() -> URLSession {
