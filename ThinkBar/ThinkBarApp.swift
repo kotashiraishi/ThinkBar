@@ -10,10 +10,8 @@ import ThinkBarCore
 
 @main
 struct ThinkBarApp: App {
-    private let provider = ProviderFactory.makeProvider(from: ProviderConfiguration(
-        kind: .ollama,
-        model: "gemma3:4b"
-    ))
+    @State private var providerConfiguration =
+        ProviderConfiguration.defaultConfiguration(for: .ollama)
 
 #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -21,7 +19,10 @@ struct ThinkBarApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(provider: provider)
+            ContentView(
+                provider: ProviderFactory.makeProvider(from: providerConfiguration),
+                providerConfiguration: $providerConfiguration
+            )
         }
     }
 }

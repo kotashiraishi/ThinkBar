@@ -2,6 +2,21 @@ import Testing
 @testable import ThinkBarCore
 
 struct ProviderConfigurationTests {
+    @Test func providerKindsExposePickerMetadata() {
+        #expect(ProviderKind.allCases.map(\.title) == [
+            "Ollama",
+            "OpenRouter",
+        ])
+        #expect(
+            ProviderConfiguration.defaultConfiguration(for: .ollama).model
+                == "gemma3:4b"
+        )
+        #expect(
+            ProviderConfiguration.defaultConfiguration(for: .openRouter).model
+                == "openai/gpt-4o-mini"
+        )
+    }
+
     @Test func storesOllamaConfigurationWithoutAPIKey() {
         let configuration = ProviderConfiguration(
             kind: .ollama,

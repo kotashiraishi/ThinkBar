@@ -6,6 +6,11 @@ public protocol AIProvider: Sendable {
         _ prompt: Prompt,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws
+    func stream(
+        conversationHistory: [(user: String, assistant: String)],
+        mode: ConversationMode,
+        onChunk: @escaping @Sendable (String) async -> Void
+    ) async throws
 }
 
 public extension AIProvider {
@@ -15,5 +20,14 @@ public extension AIProvider {
     ) async throws {
         let response = try await ask(prompt)
         await onChunk(response.text)
+    }
+
+    func stream(
+        conversationHistory: [(user: String, assistant: String)],
+        mode: ConversationMode,
+        onChunk: @escaping @Sendable (String) async -> Void
+    ) async throws {
+        let prompt = Prompt(text: conversationHistory.last?.user ?? "")
+        try await stream(prompt, onChunk: onChunk)
     }
 }

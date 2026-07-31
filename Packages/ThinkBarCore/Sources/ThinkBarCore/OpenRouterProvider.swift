@@ -70,7 +70,7 @@ public struct OpenRouterProvider: AIProvider {
 
     public func stream(
         conversationHistory: [(user: String, assistant: String)],
-        mode: OllamaProvider.Mode = .general,
+        mode: ConversationMode = .general,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
         try await stream(
@@ -130,7 +130,7 @@ public struct OpenRouterProvider: AIProvider {
 
     private func conversationMessages(
         from history: [(user: String, assistant: String)],
-        mode: OllamaProvider.Mode
+        mode: ConversationMode
     ) -> [Message] {
         var messages = [
             Message(

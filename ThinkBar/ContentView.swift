@@ -16,6 +16,7 @@ struct ContentView: View {
     ]
 
     let provider: any AIProvider
+    @Binding var providerConfiguration: ProviderConfiguration
 
     @State private var input = ""
     @State private var attachments: [Attachment] = []
@@ -24,13 +25,27 @@ struct ContentView: View {
     @State private var conversations: [Conversation] = []
     @State private var isSending = false
     @State private var isThinking = false
-    @State private var selectedMode = OllamaProvider.Mode.general
+    @State private var selectedMode = ConversationMode.general
     @State private var inputFocusRequest = 0
 
     var body: some View {
         VStack {
+            Picker("Provider", selection: Binding(
+                get: { providerConfiguration.kind },
+                set: {
+                    providerConfiguration = .defaultConfiguration(for: $0)
+                }
+            )) {
+                ForEach(ProviderKind.allCases) { kind in
+                    Text(kind.title)
+                        .tag(kind)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(isSending)
+
             Picker("Mode", selection: $selectedMode) {
-                ForEach(OllamaProvider.Mode.builtIn) { mode in
+                ForEach(ConversationMode.builtIn) { mode in
                     Text(mode.title)
                         .tag(mode)
                 }
@@ -195,47 +210,42 @@ struct ContentView: View {
         isThinking = true
 
         do {
-            if let ollamaProvider = provider as? OllamaProvider {
-                let buffer = StreamBuffer()
-                let updateTask = Task { @MainActor in
-                    while !Task.isCancelled {
-                        try await Task.sleep(for: .milliseconds(75))
-                        let bufferedText = await buffer.drain()
+            let buffer = StreamBuffer()
+            let updateTask = Task { @MainActor in
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .milliseconds(75))
+                    let bufferedText = await buffer.drain()
 
-                        if !bufferedText.isEmpty {
-                            isThinking = false
-                            append(bufferedText, to: conversation.id)
-                        }
+                    if !bufferedText.isEmpty {
+                        isThinking = false
+                        append(bufferedText, to: conversation.id)
                     }
                 }
+            }
 
-                do {
-                    let history = conversations.map {
-                        (user: $0.request, assistant: $0.assistant)
-                    }
-                    try await ollamaProvider.stream(
-                        conversationHistory: history,
-                        mode: mode
-                    ) { chunk in
-                        await buffer.append(chunk)
-                    }
-                } catch {
-                    updateTask.cancel()
-                    try? await updateTask.value
-                    throw error
+            do {
+                let history = conversations.map {
+                    (user: $0.request, assistant: $0.assistant)
                 }
-
+                try await provider.stream(
+                    conversationHistory: history,
+                    mode: mode
+                ) { chunk in
+                    await buffer.append(chunk)
+                }
+            } catch {
                 updateTask.cancel()
                 try? await updateTask.value
+                throw error
+            }
 
-                let remainingText = await buffer.drain()
-                if !remainingText.isEmpty {
-                    isThinking = false
-                    append(remainingText, to: conversation.id)
-                }
-            } else {
-                let response = try await provider.ask(Prompt(text: requestPrompt))
-                append(response.text, to: conversation.id)
+            updateTask.cancel()
+            try? await updateTask.value
+
+            let remainingText = await buffer.drain()
+            if !remainingText.isEmpty {
+                isThinking = false
+                append(remainingText, to: conversation.id)
             }
 
             renderMarkdown(for: conversation.id)
@@ -452,7 +462,12 @@ private final class SendingTextView: NSTextView {
 }
 
 #Preview {
-    ContentView(provider: FakeAIProvider())
+    ContentView(
+        provider: FakeAIProvider(),
+        providerConfiguration: .constant(
+            .defaultConfiguration(for: .ollama)
+        )
+    )
 }
 
 private struct Conversation: Identifiable {
