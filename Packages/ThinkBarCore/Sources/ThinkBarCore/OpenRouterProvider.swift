@@ -1,7 +1,7 @@
 import Foundation
 
 public struct OpenRouterProvider: AIProvider {
-    private static let defaultAPIKey = "YOUR_OPENROUTER_API_KEY"
+    static let defaultAPIKey = "YOUR_OPENROUTER_API_KEY"
     private static let defaultEndpoint = URL(
         string: "https://openrouter.ai/api/v1/chat/completions"
     )!
