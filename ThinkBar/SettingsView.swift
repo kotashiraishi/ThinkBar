@@ -10,7 +10,7 @@ struct SettingsView: View {
     @State private var draftAPIKey: String
     @State private var availableModels: [ProviderModel] = []
     @State private var isLoadingModels = false
-    @State private var statusMessage: String?
+    @State private var feedback: Feedback?
 
     init(
         providerConfiguration: Binding<ProviderConfiguration>,
@@ -76,8 +76,8 @@ struct SettingsView: View {
                 saveSettings()
             }
 
-            if let statusMessage {
-                Text(statusMessage)
+            if let feedback {
+                Text(feedback.message)
                     .foregroundStyle(.secondary)
             }
         }
@@ -89,6 +89,15 @@ struct SettingsView: View {
             if draftConfiguration.kind == .ollama {
                 await refreshOllamaModels()
             }
+        }
+        .task(id: feedback?.id) {
+            guard let feedback else { return }
+            try? await Task.sleep(for: .seconds(3))
+            guard
+                !Task.isCancelled,
+                self.feedback?.id == feedback.id
+            else { return }
+            self.feedback = nil
         }
     }
 
@@ -106,7 +115,7 @@ struct SettingsView: View {
             for: providerConfiguration.kind,
             selectedModel: providerConfiguration.model
         )
-        statusMessage = nil
+        feedback = nil
     }
 
     private func loadConfiguration(for kind: ProviderKind) {
@@ -118,7 +127,7 @@ struct SettingsView: View {
                 selectedModel: loadedConfiguration.model
             )
             draftAPIKey = loadedConfiguration.apiKey ?? ""
-            statusMessage = nil
+            feedback = nil
         } catch {
             draftConfiguration = .defaultConfiguration(for: kind)
             availableModels = initialModels(
@@ -126,7 +135,7 @@ struct SettingsView: View {
                 selectedModel: draftConfiguration.model
             )
             draftAPIKey = ""
-            statusMessage = error.localizedDescription
+            showFeedback(error.localizedDescription)
         }
     }
 
@@ -136,7 +145,7 @@ struct SettingsView: View {
             model: model,
             apiKey: draftConfiguration.apiKey
         )
-        statusMessage = nil
+        feedback = nil
     }
 
     private func refreshOllamaModels() async {
@@ -153,7 +162,7 @@ struct SettingsView: View {
             let models = try await modelService.models()
             guard draftConfiguration.kind == .ollama else { return }
             guard !models.isEmpty else {
-                statusMessage = "No installed Ollama models found."
+                showFeedback("No installed Ollama models found.")
                 return
             }
 
@@ -162,9 +171,9 @@ struct SettingsView: View {
                let firstModel = models.first {
                 selectModel(firstModel.id)
             }
-            statusMessage = nil
+            feedback = nil
         } catch {
-            statusMessage = error.localizedDescription
+            showFeedback(error.localizedDescription)
         }
     }
 
@@ -193,10 +202,14 @@ struct SettingsView: View {
             try settingsService.save(configuration)
             providerConfiguration = configuration
             draftConfiguration = configuration
-            statusMessage = "Saved"
+            showFeedback("Saved")
         } catch {
-            statusMessage = error.localizedDescription
+            showFeedback(error.localizedDescription)
         }
+    }
+
+    private func showFeedback(_ message: String) {
+        feedback = Feedback(message: message)
     }
 
     private var normalizedAPIKey: String? {
@@ -205,4 +218,9 @@ struct SettingsView: View {
         )
         return apiKey.isEmpty ? nil : apiKey
     }
+}
+
+private struct Feedback: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
 }
