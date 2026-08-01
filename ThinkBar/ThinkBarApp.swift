@@ -12,6 +12,7 @@ import ThinkBarCore
 struct ThinkBarApp: App {
     @State private var providerConfiguration =
         ProviderConfiguration.defaultConfiguration(for: .ollama)
+    private let settingsService = ProviderSettingsService()
 
 #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -20,8 +21,14 @@ struct ThinkBarApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(
-                provider: ProviderFactory.makeProvider(from: providerConfiguration),
-                providerConfiguration: $providerConfiguration
+                provider: ProviderFactory.makeProvider(from: providerConfiguration)
+            )
+        }
+
+        Settings {
+            SettingsView(
+                providerConfiguration: $providerConfiguration,
+                settingsService: settingsService
             )
         }
     }

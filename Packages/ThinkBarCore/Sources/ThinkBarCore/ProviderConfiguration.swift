@@ -12,15 +12,6 @@ public enum ProviderKind: CaseIterable, Hashable, Identifiable, Sendable {
             "OpenRouter"
         }
     }
-
-    fileprivate var defaultModel: String {
-        switch self {
-        case .ollama:
-            "gemma3:4b"
-        case .openRouter:
-            "openai/gpt-4o-mini"
-        }
-    }
 }
 
 public struct ProviderConfiguration: Sendable, Equatable {
@@ -43,7 +34,7 @@ public struct ProviderConfiguration: Sendable, Equatable {
     ) -> ProviderConfiguration {
         ProviderConfiguration(
             kind: kind,
-            model: kind.defaultModel
+            model: ProviderModelCatalog.defaultModel(for: kind).id
         )
     }
 }

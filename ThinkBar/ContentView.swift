@@ -16,7 +16,6 @@ struct ContentView: View {
     ]
 
     let provider: any AIProvider
-    @Binding var providerConfiguration: ProviderConfiguration
 
     @State private var input = ""
     @State private var attachments: [Attachment] = []
@@ -30,20 +29,6 @@ struct ContentView: View {
 
     var body: some View {
         VStack {
-            Picker("Provider", selection: Binding(
-                get: { providerConfiguration.kind },
-                set: {
-                    providerConfiguration = .defaultConfiguration(for: $0)
-                }
-            )) {
-                ForEach(ProviderKind.allCases) { kind in
-                    Text(kind.title)
-                        .tag(kind)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(isSending)
-
             Picker("Mode", selection: $selectedMode) {
                 ForEach(ConversationMode.builtIn) { mode in
                     Text(mode.title)
@@ -462,12 +447,7 @@ private final class SendingTextView: NSTextView {
 }
 
 #Preview {
-    ContentView(
-        provider: FakeAIProvider(),
-        providerConfiguration: .constant(
-            .defaultConfiguration(for: .ollama)
-        )
-    )
+    ContentView(provider: FakeAIProvider())
 }
 
 private struct Conversation: Identifiable {
