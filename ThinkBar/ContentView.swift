@@ -16,6 +16,15 @@ struct ContentView: View {
     ]
 
     let provider: any AIProvider
+    let conversationStore: ConversationStore
+
+    init(
+        provider: any AIProvider,
+        conversationStore: ConversationStore = ConversationStore()
+    ) {
+        self.provider = provider
+        self.conversationStore = conversationStore
+    }
 
     @State private var input = ""
     @State private var attachments: [Attachment] = []
@@ -176,6 +185,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
             focusInput()
         }
+        .task {
+            loadConversations()
+        }
     }
 
     private func send() async {
@@ -234,6 +246,7 @@ struct ContentView: View {
             }
 
             renderMarkdown(for: conversation.id)
+            saveConversations()
             attachments.removeAll()
             imageAttachments.removeAll()
             attachmentError = nil
@@ -247,6 +260,39 @@ struct ContentView: View {
         isThinking = false
         isSending = false
         focusInput()
+    }
+
+    private func loadConversations() {
+        guard conversations.isEmpty, let records = try? conversationStore.load() else {
+            return
+        }
+
+        conversations = records.map { record in
+            let renderedAssistant: AttributedString?
+            if shouldRenderMarkdown(record.assistant) {
+                renderedAssistant = try? AttributedString(markdown: record.assistant)
+            } else {
+                renderedAssistant = nil
+            }
+            return Conversation(
+                id: record.id,
+                user: record.user,
+                request: record.user,
+                assistant: record.assistant,
+                renderedAssistant: renderedAssistant
+            )
+        }
+    }
+
+    private func saveConversations() {
+        let records = conversations.map {
+            ConversationRecord(
+                id: $0.id,
+                user: $0.user,
+                assistant: $0.assistant
+            )
+        }
+        try? conversationStore.save(records)
     }
 
     private func edit(_ message: String) {
@@ -451,11 +497,25 @@ private final class SendingTextView: NSTextView {
 }
 
 private struct Conversation: Identifiable {
-    let id = UUID()
+    let id: UUID
     let user: String
     let request: String
-    var assistant = ""
+    var assistant: String
     var renderedAssistant: AttributedString?
+
+    init(
+        id: UUID = UUID(),
+        user: String,
+        request: String,
+        assistant: String = "",
+        renderedAssistant: AttributedString? = nil
+    ) {
+        self.id = id
+        self.user = user
+        self.request = request
+        self.assistant = assistant
+        self.renderedAssistant = renderedAssistant
+    }
 }
 
 private actor StreamBuffer {
