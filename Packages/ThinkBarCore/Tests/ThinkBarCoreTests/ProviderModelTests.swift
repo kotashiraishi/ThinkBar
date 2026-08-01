@@ -2,12 +2,8 @@ import Testing
 @testable import ThinkBarCore
 
 struct ProviderModelTests {
-    @Test func ollamaModelsAreAvailable() {
-        #expect(ProviderModelCatalog.models(for: .ollama).map(\.id) == [
-            "gemma3:4b",
-            "llama3",
-            "qwen2",
-        ])
+    @Test func ollamaModelsAreDiscoveredDynamically() {
+        #expect(ProviderModelCatalog.models(for: .ollama).isEmpty)
         #expect(
             ProviderModelCatalog.defaultModel(for: .ollama).id
                 == "gemma3:4b"

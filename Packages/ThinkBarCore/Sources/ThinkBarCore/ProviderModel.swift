@@ -12,11 +12,7 @@ public enum ProviderModelCatalog {
     public static func models(for kind: ProviderKind) -> [ProviderModel] {
         switch kind {
         case .ollama:
-            [
-                ProviderModel(id: "gemma3:4b", title: "gemma3:4b"),
-                ProviderModel(id: "llama3", title: "llama3"),
-                ProviderModel(id: "qwen2", title: "qwen2"),
-            ]
+            []
         case .openRouter:
             [
                 ProviderModel(

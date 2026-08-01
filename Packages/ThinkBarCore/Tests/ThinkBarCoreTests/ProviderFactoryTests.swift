@@ -24,4 +24,14 @@ struct ProviderFactoryTests {
 
         #expect(provider is OpenRouterProvider)
     }
+
+    @Test func createsModelDiscoveryOnlyForOllama() {
+        let ollamaService = ProviderFactory.makeModelDiscoveryService(for: .ollama)
+        let openRouterService = ProviderFactory.makeModelDiscoveryService(
+            for: .openRouter
+        )
+
+        #expect(ollamaService is OllamaModelService)
+        #expect(openRouterService == nil)
+    }
 }

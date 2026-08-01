@@ -1,4 +1,4 @@
-public enum ProviderKind: CaseIterable, Hashable, Identifiable, Sendable {
+public enum ProviderKind: String, CaseIterable, Hashable, Identifiable, Sendable {
     case ollama
     case openRouter
 

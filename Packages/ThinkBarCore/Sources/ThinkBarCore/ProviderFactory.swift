@@ -19,4 +19,15 @@ public enum ProviderFactory {
             )
         }
     }
+
+    public static func makeModelDiscoveryService(
+        for kind: ProviderKind
+    ) -> (any ProviderModelDiscovering)? {
+        switch kind {
+        case .ollama:
+            OllamaModelService(baseURL: ollamaBaseURL)
+        case .openRouter:
+            nil
+        }
+    }
 }
