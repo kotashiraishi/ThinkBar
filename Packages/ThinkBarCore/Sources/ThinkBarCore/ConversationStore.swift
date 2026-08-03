@@ -27,15 +27,19 @@ public struct ConversationContextMetadata:
     public let request: String?
     public let attachmentContext: String?
     public let summary: String?
+    public let summaryCoveredConversationCount: Int?
 
     public init(
         request: String? = nil,
         attachmentContext: String? = nil,
-        summary: String? = nil
+        summary: String? = nil,
+        summaryCoveredConversationCount: Int? = nil
     ) {
         self.request = request
         self.attachmentContext = attachmentContext
         self.summary = summary
+        self.summaryCoveredConversationCount =
+            summaryCoveredConversationCount
     }
 }
 

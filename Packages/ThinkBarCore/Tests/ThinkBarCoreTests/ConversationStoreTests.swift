@@ -29,7 +29,8 @@ struct ConversationStoreTests {
                 assistant: "Second answer",
                 context: ConversationContextMetadata(
                     request: "Attached context\nSecond question",
-                    summary: "Earlier discussion summary"
+                    summary: "Earlier discussion summary",
+                    summaryCoveredConversationCount: 2
                 )
             ),
         ]

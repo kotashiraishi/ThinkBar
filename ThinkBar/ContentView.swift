@@ -244,7 +244,12 @@ struct ContentView: View {
             do {
                 try await conversationRunner.stream(
                     conversations: conversationRecords(),
-                    mode: mode
+                    mode: mode,
+                    onSummaryUpdate: { update in
+                        await MainActor.run {
+                            applySummaryUpdate(update)
+                        }
+                    }
                 ) { chunk in
                     await buffer.append(chunk)
                 }
@@ -297,7 +302,9 @@ struct ContentView: View {
                 assistant: record.assistant,
                 renderedAssistant: renderedAssistant,
                 attachmentContext: record.context?.attachmentContext,
-                contextSummary: record.context?.summary
+                contextSummary: record.context?.summary,
+                summaryCoveredConversationCount:
+                    record.context?.summaryCoveredConversationCount
             )
         }
     }
@@ -317,7 +324,9 @@ struct ContentView: View {
                     context: ConversationContextMetadata(
                         request: $0.request,
                         attachmentContext: $0.attachmentContext,
-                        summary: $0.contextSummary
+                        summary: $0.contextSummary,
+                        summaryCoveredConversationCount:
+                            $0.summaryCoveredConversationCount
                     )
                 )
             }
@@ -415,6 +424,19 @@ struct ContentView: View {
         else { return }
 
         conversations[index].errorMessage = message
+    }
+
+    private func applySummaryUpdate(
+        _ update: ConversationSummaryUpdate
+    ) {
+        guard let index = conversations.firstIndex(where: {
+            $0.id == update.conversationID
+        }) else { return }
+
+        conversations[index].contextSummary = update.summary
+        conversations[index].summaryCoveredConversationCount =
+            update.coveredConversationCount
+        saveConversations()
     }
 
     private func renderMarkdown(for conversationID: UUID) {
@@ -548,6 +570,7 @@ private struct Conversation: Identifiable {
     var errorMessage: String?
     var attachmentContext: String?
     var contextSummary: String?
+    var summaryCoveredConversationCount: Int?
 
     init(
         id: UUID = UUID(),
@@ -557,7 +580,8 @@ private struct Conversation: Identifiable {
         renderedAssistant: AttributedString? = nil,
         errorMessage: String? = nil,
         attachmentContext: String? = nil,
-        contextSummary: String? = nil
+        contextSummary: String? = nil,
+        summaryCoveredConversationCount: Int? = nil
     ) {
         self.id = id
         self.user = user
@@ -567,6 +591,8 @@ private struct Conversation: Identifiable {
         self.errorMessage = errorMessage
         self.attachmentContext = attachmentContext
         self.contextSummary = contextSummary
+        self.summaryCoveredConversationCount =
+            summaryCoveredConversationCount
     }
 }
 

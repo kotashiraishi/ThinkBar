@@ -78,6 +78,12 @@ struct DebugConsoleView: View {
         detail("Attachment Context", entry.attachmentContext ?? "None")
         detail("Conversation Summary", entry.conversationSummary ?? "None")
         detail("Provider Response", entry.providerResponse)
+        if entry.summaryGenerationTriggered {
+            detail("Summary Generation Triggered", "Yes")
+            detail("Previous Summary", entry.previousSummary ?? "None")
+            detail("Generated Summary", entry.generatedSummary ?? "None")
+            detail("Summary Update", entry.summaryUpdateStatus ?? "Unknown")
+        }
     }
 
     private func detail(_ title: String, _ value: String) -> some View {

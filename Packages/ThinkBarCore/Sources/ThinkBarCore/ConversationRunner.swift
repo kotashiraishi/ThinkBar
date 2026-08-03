@@ -5,40 +5,47 @@ public struct ConversationRunner: Sendable {
     private let configuration: ProviderConfiguration
     private let contextBuilder: ConversationContextBuilder
     private let debugLogRecorder: (any DebugLogRecording)?
+    private let summaryService: ConversationSummaryService
 
     public init(
         provider: any AIProvider,
         configuration: ProviderConfiguration,
         contextBuilder: ConversationContextBuilder = ConversationContextBuilder(),
-        debugLogRecorder: (any DebugLogRecording)? = nil
+        debugLogRecorder: (any DebugLogRecording)? = nil,
+        summaryPolicy: ConversationSummaryPolicy = ConversationSummaryPolicy()
     ) {
         self.provider = provider
         self.configuration = configuration
         self.contextBuilder = contextBuilder
         self.debugLogRecorder = debugLogRecorder
+        self.summaryService = ConversationSummaryService(
+            provider: provider,
+            policy: summaryPolicy
+        )
     }
 
     public func stream(
         conversations: [ConversationRecord],
         mode: ConversationMode,
+        onSummaryUpdate: @escaping @Sendable (
+            ConversationSummaryUpdate
+        ) async -> Void = { _ in },
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
         let context = contextBuilder.build(from: conversations)
         let loggingEnabled = await debugLogRecorder?.loggingEnabled() ?? false
-        let responseBuffer = loggingEnabled ? DebugResponseBuffer() : nil
+        let responseBuffer = DebugResponseBuffer()
 
         do {
             try await provider.stream(
                 conversationContext: context,
                 mode: mode
             ) { chunk in
-                if let responseBuffer {
-                    await responseBuffer.append(chunk)
-                }
+                await responseBuffer.append(chunk)
                 await onChunk(chunk)
             }
         } catch {
-            if let responseBuffer {
+            if loggingEnabled {
                 let response = await responseBuffer.text
                 await record(
                     conversations: conversations,
@@ -52,13 +59,38 @@ public struct ConversationRunner: Sendable {
             throw error
         }
 
-        if let responseBuffer {
+        let response = await responseBuffer.text
+        if loggingEnabled {
             await record(
                 conversations: conversations,
                 context: context,
                 mode: mode,
-                response: await responseBuffer.text
+                response: response
             )
+        }
+
+        let completedConversations = completingLatestConversation(
+            in: conversations,
+            with: response
+        )
+        let summaryService = self.summaryService
+        let debugLogRecorder = self.debugLogRecorder
+        let configuration = self.configuration
+        Task {
+            let outcome = await summaryService.updateIfNeeded(
+                conversations: completedConversations
+            )
+            if case let .updated(update) = outcome {
+                await onSummaryUpdate(update)
+            }
+            if loggingEnabled, let debugLogRecorder {
+                await recordSummaryOutcome(
+                    outcome,
+                    conversations: completedConversations,
+                    configuration: configuration,
+                    debugLogRecorder: debugLogRecorder
+                )
+            }
         }
     }
 
@@ -96,6 +128,62 @@ public struct ConversationRunner: Sendable {
             attachmentContext: latestConversation?.context?.attachmentContext,
             conversationSummary: context.summary,
             providerResponse: response
+        ))
+    }
+
+    private func completingLatestConversation(
+        in conversations: [ConversationRecord],
+        with response: String
+    ) -> [ConversationRecord] {
+        guard let latest = conversations.last else { return conversations }
+
+        var completed = conversations
+        completed[completed.count - 1] = ConversationRecord(
+            id: latest.id,
+            user: latest.user,
+            assistant: response,
+            context: latest.context
+        )
+        return completed
+    }
+
+    private func recordSummaryOutcome(
+        _ outcome: ConversationSummaryOutcome,
+        conversations: [ConversationRecord],
+        configuration: ProviderConfiguration,
+        debugLogRecorder: any DebugLogRecording
+    ) async {
+        guard outcome != .notTriggered else { return }
+
+        let previousSummary: String?
+        let generatedSummary: String?
+        let status: String
+        switch outcome {
+        case .notTriggered:
+            return
+        case let .updated(update):
+            previousSummary = update.previousSummary
+            generatedSummary = update.summary
+            status = "Success (\(update.trigger.rawValue))"
+        case let .failed(summary, trigger, errorDescription):
+            previousSummary = summary
+            generatedSummary = nil
+            status = "Failed (\(trigger.rawValue)): \(errorDescription)"
+        }
+
+        await debugLogRecorder.record(DebugLogEntry(
+            provider: configuration.kind.title,
+            model: configuration.model,
+            mode: "Conversation Summary",
+            generatedContext: "",
+            userMessage: conversations.last?.user ?? "",
+            attachmentContext: nil,
+            conversationSummary: previousSummary,
+            providerResponse: "",
+            summaryGenerationTriggered: true,
+            previousSummary: previousSummary,
+            generatedSummary: generatedSummary,
+            summaryUpdateStatus: status
         ))
     }
 }
