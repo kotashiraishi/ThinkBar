@@ -54,7 +54,10 @@ struct DebugConsoleView: View {
         }
         .frame(minWidth: 620, minHeight: 480)
         .onAppear {
-            dismissIfDisabled()
+            debugLogService.setEnabled(true)
+        }
+        .onDisappear {
+            debugLogService.setEnabled(false)
         }
         .onChange(of: debugLogService.isEnabled) {
             dismissIfDisabled()

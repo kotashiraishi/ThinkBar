@@ -7,10 +7,9 @@ struct DebugConsoleCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .windowArrangement) {
             Button("Show Debug Console") {
-                guard debugLogService.isEnabled else { return }
+                debugLogService.setEnabled(true)
                 openWindow(id: "debug-console")
             }
-            .disabled(!debugLogService.isEnabled)
         }
     }
 }
