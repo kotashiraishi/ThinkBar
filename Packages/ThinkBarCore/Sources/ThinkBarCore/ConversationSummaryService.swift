@@ -172,22 +172,33 @@ public actor ConversationSummaryService {
         .joined(separator: "\n\n")
 
         return """
-        You maintain durable conversation memory for future AI responses.
-        Do not merely shorten the full transcript.
+        You maintain durable user memory for a future assistant.
+        This is not a conversation recap, meeting minutes, or transcript summary.
+        Write what the future assistant needs to know about the user and their work.
 
-        Preserve:
-        - The user's continuing goals and ongoing tasks.
-        - Active project names, technologies, and relevant project context.
-        - Design or implementation decisions already made and their constraints.
+        Focus on:
+        - The user's continuing goals and what they are trying to achieve.
+        - Active projects, product intent, and useful project context.
+        - Important design or architectural decisions and their constraints.
         - Stable user preferences, requirements, and working constraints.
+        - Background that will improve future responses.
+
+        Write about the user and project state, not about what the AI said.
+        Keep important decisions, but stay concise.
+        Prefer describing the current state over chronological implementation history.
+        Prefer stable facts that will remain useful in future conversations over temporary events.
+        Describe capabilities and design decisions, not the steps taken to achieve them.
 
         Omit:
-        - Temporary small talk.
-        - One-off errors that have already been resolved.
-        - Repeated explanations and details with no future value.
+        - AI opinions, praise, evaluations, or self-commentary.
+        - Generic advice or explanations.
+        - Temporary small talk and one-off questions.
+        - Resolved temporary problems and one-off errors.
+        - Chronological conversation logs or turn-by-turn history.
+        - Issue numbers and fine-grained implementation history.
+        - Repeated details with no future value.
 
-        Write a concise, factual memory that improves future response quality.
-        Do not invent information. Return only the updated summary.
+        Do not invent information. Return only the updated memory summary.
 
         Existing Summary:
         \(existingSummary ?? "None")

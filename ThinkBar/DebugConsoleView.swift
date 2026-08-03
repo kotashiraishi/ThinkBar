@@ -13,6 +13,11 @@ struct DebugConsoleView: View {
                         Text("Debug Console")
                             .font(.headline)
                         Spacer()
+                        Menu("Test Data") {
+                            Button("Load Long Conversation Sample") {
+                                debugLogService.loadLongConversationSample()
+                            }
+                        }
                         Button("Clear") {
                             debugLogService.clear()
                         }
@@ -78,6 +83,20 @@ struct DebugConsoleView: View {
         detail("Attachment Context", entry.attachmentContext ?? "None")
         detail("Conversation Summary", entry.conversationSummary ?? "None")
         detail("Provider Response", entry.providerResponse)
+        if let statistics = entry.contextStatistics {
+            contextStatistics(
+                entry.conversationSummary == nil
+                    ? "Context without Summary"
+                    : "Context with Summary",
+                statistics
+            )
+        }
+        if let statistics = entry.contextWithoutSummaryStatistics {
+            contextStatistics(
+                "Context without Summary (Full History)",
+                statistics
+            )
+        }
         if entry.summaryGenerationTriggered {
             detail("Summary Generation Triggered", "Yes")
             detail("Previous Summary", entry.previousSummary ?? "None")
@@ -97,6 +116,47 @@ struct DebugConsoleView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
+    }
+
+    private func contextStatistics(
+        _ title: String,
+        _ statistics: ConversationContextStatistics
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            sizeRow("Summary", statistics.summary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Recent History")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Turns: \(statistics.recentHistory.turns)")
+                sizeValues(statistics.recentHistory.size)
+            }
+            sizeRow("Current Message", statistics.currentMessage)
+            sizeRow("Total Context", statistics.total)
+        }
+        .font(.system(.body, design: .monospaced))
+        .padding(.vertical, 8)
+    }
+
+    private func sizeRow(
+        _ title: String,
+        _ size: ContextSizeEstimate
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            sizeValues(size)
+        }
+    }
+
+    private func sizeValues(_ size: ContextSizeEstimate) -> some View {
+        Group {
+            Text("Characters: \(size.characters)")
+            Text("Estimated Tokens: ~\(size.estimatedTokens)")
+        }
     }
 
     private func dismissIfDisabled() {

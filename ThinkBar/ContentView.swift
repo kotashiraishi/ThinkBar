@@ -109,7 +109,7 @@ struct ContentView: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 12) {
                         ForEach(conversations) { conversation in
                             VStack(alignment: .leading) {
                                 HStack {
@@ -128,6 +128,7 @@ struct ContentView: View {
                                 Text(conversation.user)
                                     .font(.title3)
                                     .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
@@ -145,6 +146,7 @@ struct ContentView: View {
                                         .font(.title3)
                                         .foregroundStyle(.red)
                                         .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 } else if isThinking && conversation.id == conversations.last?.id {
                                     HStack {
                                         ProgressView()
@@ -155,10 +157,12 @@ struct ContentView: View {
                                     Text(renderedAssistant)
                                         .font(.title3)
                                         .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 } else {
                                     Text(conversation.assistant)
                                         .font(.title3)
                                         .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -291,7 +295,10 @@ struct ContentView: View {
         conversations = records.map { record in
             let renderedAssistant: AttributedString?
             if shouldRenderMarkdown(record.assistant) {
-                renderedAssistant = try? AttributedString(markdown: record.assistant)
+                renderedAssistant =
+                    AssistantResponseFormatter.markdownPreservingWhitespace(
+                        record.assistant
+                    )
             } else {
                 renderedAssistant = nil
             }
@@ -451,9 +458,10 @@ struct ContentView: View {
             return
         }
 
-        conversations[index].renderedAssistant = try? AttributedString(
-            markdown: text
-        )
+        conversations[index].renderedAssistant =
+            AssistantResponseFormatter.markdownPreservingWhitespace(
+                text
+            )
     }
 
     private func shouldRenderMarkdown(_ text: String) -> Bool {

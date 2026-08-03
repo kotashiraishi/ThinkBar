@@ -40,11 +40,19 @@ struct ConversationSummaryServiceTests {
         #expect(update.coveredConversationCount == 2)
         #expect(update.trigger == .turnThreshold)
         let prompt = try #require(await provider.prompts.first)
+        #expect(prompt.contains("durable user memory"))
+        #expect(prompt.contains("not a conversation recap"))
         #expect(prompt.contains("continuing goals"))
-        #expect(prompt.contains("Design or implementation decisions"))
+        #expect(prompt.contains("Important design or architectural decisions"))
         #expect(prompt.contains("Stable user preferences"))
-        #expect(prompt.contains("One-off errors"))
-        #expect(prompt.contains("Do not merely shorten"))
+        #expect(prompt.contains("Write about the user and project state"))
+        #expect(prompt.contains("Prefer describing the current state"))
+        #expect(prompt.contains("Prefer stable facts"))
+        #expect(prompt.contains("Describe capabilities and design decisions"))
+        #expect(prompt.contains("AI opinions, praise, evaluations"))
+        #expect(prompt.contains("Issue numbers and fine-grained implementation history"))
+        #expect(prompt.contains("Chronological conversation logs"))
+        #expect(!prompt.contains("Do not merely shorten"))
     }
 
     @Test func characterThresholdTriggersSummary() async throws {

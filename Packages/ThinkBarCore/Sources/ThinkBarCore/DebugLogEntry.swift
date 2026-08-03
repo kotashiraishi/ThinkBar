@@ -15,6 +15,9 @@ public struct DebugLogEntry: Identifiable, Equatable, Sendable {
     public let previousSummary: String?
     public let generatedSummary: String?
     public let summaryUpdateStatus: String?
+    public let contextStatistics: ConversationContextStatistics?
+    public let contextWithoutSummaryStatistics:
+        ConversationContextStatistics?
 
     public init(
         id: UUID = UUID(),
@@ -30,7 +33,10 @@ public struct DebugLogEntry: Identifiable, Equatable, Sendable {
         summaryGenerationTriggered: Bool = false,
         previousSummary: String? = nil,
         generatedSummary: String? = nil,
-        summaryUpdateStatus: String? = nil
+        summaryUpdateStatus: String? = nil,
+        contextStatistics: ConversationContextStatistics? = nil,
+        contextWithoutSummaryStatistics:
+            ConversationContextStatistics? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -46,6 +52,9 @@ public struct DebugLogEntry: Identifiable, Equatable, Sendable {
         self.previousSummary = previousSummary
         self.generatedSummary = generatedSummary
         self.summaryUpdateStatus = summaryUpdateStatus
+        self.contextStatistics = contextStatistics
+        self.contextWithoutSummaryStatistics =
+            contextWithoutSummaryStatistics
     }
 }
 

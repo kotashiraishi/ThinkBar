@@ -68,6 +68,21 @@ struct ConversationStoreTests {
         #expect(conversation.user == "Legacy question")
         #expect(conversation.context == nil)
     }
+
+    @Test func preservesAssistantWhitespaceExactly() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConversationStore(
+            fileURL: directory.appendingPathComponent("conversations.json")
+        )
+        let response = "First paragraph.\n\n  indented line  \n\nLast.\n"
+
+        try store.save([
+            ConversationRecord(user: "Question", assistant: response),
+        ])
+
+        #expect(try store.load().first?.assistant == response)
+    }
 }
 
 private func temporaryDirectory() -> URL {

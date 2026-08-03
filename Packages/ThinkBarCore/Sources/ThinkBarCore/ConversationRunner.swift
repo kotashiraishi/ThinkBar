@@ -32,7 +32,10 @@ public struct ConversationRunner: Sendable {
         ) async -> Void = { _ in },
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
-        let context = contextBuilder.build(from: conversations)
+        let buildResult = contextBuilder.buildWithStatistics(
+            from: conversations
+        )
+        let context = buildResult.context
         let loggingEnabled = await debugLogRecorder?.loggingEnabled() ?? false
         let responseBuffer = DebugResponseBuffer()
 
@@ -50,6 +53,9 @@ public struct ConversationRunner: Sendable {
                 await record(
                     conversations: conversations,
                     context: context,
+                    statistics: buildResult.statistics,
+                    contextWithoutSummaryStatistics:
+                        buildResult.contextWithoutSummaryStatistics,
                     mode: mode,
                     response: response.isEmpty
                         ? "Error: \(error.localizedDescription)"
@@ -64,6 +70,9 @@ public struct ConversationRunner: Sendable {
             await record(
                 conversations: conversations,
                 context: context,
+                statistics: buildResult.statistics,
+                contextWithoutSummaryStatistics:
+                    buildResult.contextWithoutSummaryStatistics,
                 mode: mode,
                 response: response
             )
@@ -97,6 +106,9 @@ public struct ConversationRunner: Sendable {
     private func record(
         conversations: [ConversationRecord],
         context: ConversationContext,
+        statistics: ConversationContextStatistics,
+        contextWithoutSummaryStatistics:
+            ConversationContextStatistics?,
         mode: ConversationMode,
         response: String
     ) async {
@@ -127,7 +139,10 @@ public struct ConversationRunner: Sendable {
             userMessage: latestConversation?.user ?? "",
             attachmentContext: latestConversation?.context?.attachmentContext,
             conversationSummary: context.summary,
-            providerResponse: response
+            providerResponse: response,
+            contextStatistics: statistics,
+            contextWithoutSummaryStatistics:
+                contextWithoutSummaryStatistics
         ))
     }
 

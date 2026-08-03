@@ -37,6 +37,9 @@ struct ConversationRunnerTests {
         #expect(entry.conversationSummary == "Earlier summary")
         #expect(entry.generatedContext.contains("Attachment\nQuestion"))
         #expect(entry.providerResponse == "Hello")
+        #expect(entry.contextStatistics?.summary.characters == 15)
+        #expect(entry.contextStatistics?.currentMessage.characters == 19)
+        #expect(entry.contextWithoutSummaryStatistics != nil)
     }
 
     @Test func doesNotRecordWhenDisabled() async throws {
