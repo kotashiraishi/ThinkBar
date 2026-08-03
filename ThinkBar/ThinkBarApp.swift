@@ -36,6 +36,9 @@ struct ThinkBarApp: App {
                 debugLogRecorder: debugLogService
             )
         }
+        .commands {
+            DebugConsoleCommands(debugLogService: debugLogService)
+        }
 
         Settings {
             SettingsView(

@@ -79,20 +79,17 @@ struct SettingsView: View {
             }
 
             Section("Debug") {
-                Toggle("Debug Mode", isOn: Binding(
+                Toggle("Enable Debug Mode", isOn: Binding(
                     get: { debugLogService.isEnabled },
                     set: { isEnabled in
-                        debugLogService.isEnabled = isEnabled
-                        if !isEnabled {
+                        debugLogService.setEnabled(isEnabled)
+                        if isEnabled {
+                            openWindow(id: "debug-console")
+                        } else {
                             dismissWindow(id: "debug-console")
                         }
                     }
                 ))
-
-                Button("Open Debug Console") {
-                    openWindow(id: "debug-console")
-                }
-                .disabled(!debugLogService.isEnabled)
             }
 
             Button("Save") {
