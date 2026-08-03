@@ -2,7 +2,11 @@ import SwiftUI
 import ThinkBarCore
 
 struct SettingsView: View {
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
+
     @Binding var providerConfiguration: ProviderConfiguration
+    @ObservedObject var debugLogService: DebugLogService
 
     let settingsService: ProviderSettingsService
 
@@ -14,9 +18,11 @@ struct SettingsView: View {
 
     init(
         providerConfiguration: Binding<ProviderConfiguration>,
-        settingsService: ProviderSettingsService
+        settingsService: ProviderSettingsService,
+        debugLogService: DebugLogService
     ) {
         _providerConfiguration = providerConfiguration
+        self.debugLogService = debugLogService
         self.settingsService = settingsService
         _draftConfiguration = State(
             initialValue: providerConfiguration.wrappedValue
@@ -70,6 +76,23 @@ struct SettingsView: View {
                 Section("OpenRouter") {
                     SecureField("API Key", text: $draftAPIKey)
                 }
+            }
+
+            Section("Debug") {
+                Toggle("Debug Mode", isOn: Binding(
+                    get: { debugLogService.isEnabled },
+                    set: { isEnabled in
+                        debugLogService.isEnabled = isEnabled
+                        if !isEnabled {
+                            dismissWindow(id: "debug-console")
+                        }
+                    }
+                ))
+
+                Button("Open Debug Console") {
+                    openWindow(id: "debug-console")
+                }
+                .disabled(!debugLogService.isEnabled)
             }
 
             Button("Save") {

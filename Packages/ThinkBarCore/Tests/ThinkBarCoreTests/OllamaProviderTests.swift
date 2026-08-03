@@ -45,7 +45,11 @@ struct OllamaProviderTests {
             }
 
             try await provider.stream(
-                conversationHistory: [(user: "Hello", assistant: "")],
+                conversationContext: ConversationContext(
+                    recentTurns: [
+                        ConversationTurn(user: "Hello", assistant: ""),
+                    ]
+                ),
                 mode: mode
             ) { _ in }
         }
@@ -84,7 +88,84 @@ struct OllamaProviderTests {
         #expect(response.text == "こんにちは！")
     }
 
-    @Test func conversationStreamUsesFiveRecentTurnsAndDeliversChunks() async throws {
+    @Test func conversationSummaryIsSentAsSystemMessage() async throws {
+        let session = makeSession()
+        MockURLProtocol.handler = { request in
+            let body = try JSONDecoder().decode(
+                OllamaRequestBody.self,
+                from: try requestBody(from: request)
+            )
+            #expect(body.messages[1] == .init(
+                role: "system",
+                content: "Conversation summary:\nSummary text"
+            ))
+
+            let line = """
+            {"message":{"role":"assistant","content":""},"done":true}
+
+            """
+            return try makeHTTPResponse(
+                for: request,
+                data: Data(line.utf8)
+            )
+        }
+        defer { MockURLProtocol.handler = nil }
+
+        try await makeProvider(session: session).stream(
+            conversationContext: ConversationContext(
+                summary: "Summary text",
+                recentTurns: [
+                    ConversationTurn(user: "Hello", assistant: ""),
+                ]
+            ),
+            mode: .general
+        ) { _ in }
+    }
+
+    @Test func missingModelReturnsCommonProviderError() async throws {
+        let session = makeSession()
+        MockURLProtocol.handler = { request in
+            try makeHTTPResponse(
+                for: request,
+                statusCode: 404,
+                data: Data(#"{"error":"model not found"}"#.utf8)
+            )
+        }
+        defer { MockURLProtocol.handler = nil }
+
+        do {
+            _ = try await makeProvider(session: session).ask(
+                Prompt(text: "Hello")
+            )
+            Issue.record("Expected a model-not-found error.")
+        } catch {
+            #expect(error as? ProviderError == .modelNotFound(
+                service: "Ollama",
+                model: "gemma3:4b"
+            ))
+        }
+    }
+
+    @Test func unavailableServerReturnsCommonProviderError() async {
+        let session = makeSession()
+        MockURLProtocol.handler = { _ in
+            throw URLError(.cannotConnectToHost)
+        }
+        defer { MockURLProtocol.handler = nil }
+
+        do {
+            _ = try await makeProvider(session: session).ask(
+                Prompt(text: "Hello")
+            )
+            Issue.record("Expected a service-unavailable error.")
+        } catch {
+            #expect(error as? ProviderError == .serviceUnavailable(
+                service: "Ollama"
+            ))
+        }
+    }
+
+    @Test func conversationStreamSendsProvidedTurnsAndDeliversChunks() async throws {
         let session = makeSession()
 
         MockURLProtocol.handler = { request in
@@ -101,6 +182,8 @@ struct OllamaProviderTests {
                     Do not switch languages unless the user explicitly requests it.
                     """
                 ),
+                .init(role: "user", content: "user1"),
+                .init(role: "assistant", content: "assistant1"),
                 .init(role: "user", content: "user2"),
                 .init(role: "assistant", content: "assistant2"),
                 .init(role: "user", content: "user3"),
@@ -125,16 +208,18 @@ struct OllamaProviderTests {
         let collector = ChunkCollector()
         let provider = makeProvider(session: session)
         let history = [
-            (user: "user1", assistant: "assistant1"),
-            (user: "user2", assistant: "assistant2"),
-            (user: "user3", assistant: "assistant3"),
-            (user: "user4", assistant: "assistant4"),
-            (user: "user5", assistant: "assistant5"),
-            (user: "user6", assistant: ""),
+            ConversationTurn(user: "user1", assistant: "assistant1"),
+            ConversationTurn(user: "user2", assistant: "assistant2"),
+            ConversationTurn(user: "user3", assistant: "assistant3"),
+            ConversationTurn(user: "user4", assistant: "assistant4"),
+            ConversationTurn(user: "user5", assistant: "assistant5"),
+            ConversationTurn(user: "user6", assistant: ""),
         ]
 
         try await provider.stream(
-            conversationHistory: history,
+            conversationContext: ConversationContext(
+                recentTurns: history
+            ),
             mode: .swift
         ) { chunk in
             await collector.append(chunk)
@@ -171,11 +256,12 @@ private func makeProvider(session: URLSession) -> OllamaProvider {
 
 private func makeHTTPResponse(
     for request: URLRequest,
+    statusCode: Int = 200,
     data: Data
 ) throws -> (HTTPURLResponse, Data) {
     let response = try #require(HTTPURLResponse(
         url: request.url!,
-        statusCode: 200,
+        statusCode: statusCode,
         httpVersion: nil,
         headerFields: nil
     ))

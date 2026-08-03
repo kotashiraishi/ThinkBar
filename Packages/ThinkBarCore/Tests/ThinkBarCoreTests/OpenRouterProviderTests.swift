@@ -36,6 +36,47 @@ struct OpenRouterProviderTests {
         #expect(response.text == "Hi")
     }
 
+    @Test func missingAPIKeyReturnsCommonProviderError() async {
+        let provider = OpenRouterProvider(
+            apiKey: "",
+            model: "openai/gpt-4o-mini",
+            endpoint: URL(string: "https://openrouter.test/chat/completions")!,
+            session: makeOpenRouterSession()
+        )
+
+        do {
+            _ = try await provider.ask(Prompt(text: "Hello"))
+            Issue.record("Expected a missing-API-key error.")
+        } catch {
+            #expect(error as? ProviderError == .apiKeyMissing(
+                service: "OpenRouter"
+            ))
+        }
+    }
+
+    @Test func authenticationFailureReturnsCommonProviderError() async {
+        let session = makeOpenRouterSession()
+        OpenRouterMockURLProtocol.handler = { request in
+            try openRouterHTTPResponse(
+                for: request,
+                statusCode: 401,
+                data: Data()
+            )
+        }
+        defer { OpenRouterMockURLProtocol.handler = nil }
+
+        do {
+            _ = try await makeOpenRouterProvider(session: session).ask(
+                Prompt(text: "Hello")
+            )
+            Issue.record("Expected an authentication error.")
+        } catch {
+            #expect(error as? ProviderError == .authenticationFailed(
+                service: "OpenRouter"
+            ))
+        }
+    }
+
     @Test func conversationStreamSendsRecentMessagesAndDeliversChunks() async throws {
         let session = makeOpenRouterSession()
         OpenRouterMockURLProtocol.handler = { request in
@@ -53,6 +94,12 @@ struct OpenRouterProviderTests {
                     Do not switch languages unless the user explicitly requests it.
                     """
                 ),
+                .init(
+                    role: "system",
+                    content: "Conversation summary:\nSummary text"
+                ),
+                .init(role: "user", content: "user1"),
+                .init(role: "assistant", content: "assistant1"),
                 .init(role: "user", content: "user2"),
                 .init(role: "assistant", content: "assistant2"),
                 .init(role: "user", content: "user3"),
@@ -82,16 +129,19 @@ struct OpenRouterProviderTests {
         let collector = OpenRouterChunkCollector()
         let provider = makeOpenRouterProvider(session: session)
         let history = [
-            (user: "user1", assistant: "assistant1"),
-            (user: "user2", assistant: "assistant2"),
-            (user: "user3", assistant: "assistant3"),
-            (user: "user4", assistant: "assistant4"),
-            (user: "user5", assistant: "assistant5"),
-            (user: "user6", assistant: ""),
+            ConversationTurn(user: "user1", assistant: "assistant1"),
+            ConversationTurn(user: "user2", assistant: "assistant2"),
+            ConversationTurn(user: "user3", assistant: "assistant3"),
+            ConversationTurn(user: "user4", assistant: "assistant4"),
+            ConversationTurn(user: "user5", assistant: "assistant5"),
+            ConversationTurn(user: "user6", assistant: ""),
         ]
 
         try await provider.stream(
-            conversationHistory: history,
+            conversationContext: ConversationContext(
+                summary: "Summary text",
+                recentTurns: history
+            ),
             mode: .swift
         ) { chunk in
             await collector.append(chunk)
@@ -129,11 +179,12 @@ private func makeOpenRouterProvider(session: URLSession) -> OpenRouterProvider {
 
 private func openRouterHTTPResponse(
     for request: URLRequest,
+    statusCode: Int = 200,
     data: Data
 ) throws -> (HTTPURLResponse, Data) {
     let response = try #require(HTTPURLResponse(
         url: request.url!,
-        statusCode: 200,
+        statusCode: statusCode,
         httpVersion: nil,
         headerFields: nil
     ))

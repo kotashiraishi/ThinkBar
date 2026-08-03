@@ -7,7 +7,7 @@ public protocol AIProvider: Sendable {
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws
     func stream(
-        conversationHistory: [(user: String, assistant: String)],
+        conversationContext: ConversationContext,
         mode: ConversationMode,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws
@@ -23,11 +23,13 @@ public extension AIProvider {
     }
 
     func stream(
-        conversationHistory: [(user: String, assistant: String)],
+        conversationContext: ConversationContext,
         mode: ConversationMode,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
-        let prompt = Prompt(text: conversationHistory.last?.user ?? "")
+        let prompt = Prompt(
+            text: conversationContext.recentTurns.last?.user ?? ""
+        )
         try await stream(prompt, onChunk: onChunk)
     }
 }

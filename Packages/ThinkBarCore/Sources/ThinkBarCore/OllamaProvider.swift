@@ -23,24 +23,29 @@ public struct OllamaProvider: AIProvider {
     }
 
     public func ask(_ prompt: Prompt) async throws -> Response {
-        let body = RequestBody(
-            model: model,
-            messages: [
-                Message(role: "user", content: prompt.text),
-            ],
-            stream: false
-        )
+        do {
+            let body = RequestBody(
+                model: model,
+                messages: [
+                    Message(role: "user", content: prompt.text),
+                ],
+                stream: false
+            )
 
-        var request = URLRequest(
-            url: baseURL.appendingPathComponent("api/chat")
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
+            var request = URLRequest(
+                url: baseURL.appendingPathComponent("api/chat")
+            )
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, _) = try await session.data(for: request)
-        let result = try JSONDecoder().decode(ResponseBody.self, from: data)
-        return Response(text: result.message.content)
+            let (data, response) = try await session.data(for: request)
+            try validate(response)
+            let result = try JSONDecoder().decode(ResponseBody.self, from: data)
+            return Response(text: result.message.content)
+        } catch {
+            throw ProviderError.map(error, service: "Ollama")
+        }
     }
 
     public func stream(
@@ -56,13 +61,13 @@ public struct OllamaProvider: AIProvider {
     }
 
     public func stream(
-        conversationHistory: [(user: String, assistant: String)],
+        conversationContext: ConversationContext,
         mode: Mode = .general,
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
         try await stream(
             messages: conversationMessages(
-                from: conversationHistory,
+                from: conversationContext,
                 mode: mode
             ),
             onChunk: onChunk
@@ -73,38 +78,65 @@ public struct OllamaProvider: AIProvider {
         messages: [Message],
         onChunk: @escaping @Sendable (String) async -> Void
     ) async throws {
-        let body = RequestBody(
-            model: model,
-            messages: messages,
-            stream: true
-        )
-
-        var request = URLRequest(
-            url: baseURL.appendingPathComponent("api/chat")
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
-
-        let (bytes, _) = try await session.bytes(for: request)
-
-        for try await line in bytes.lines {
-            let result = try JSONDecoder().decode(
-                StreamResponseBody.self,
-                from: Data(line.utf8)
+        do {
+            let body = RequestBody(
+                model: model,
+                messages: messages,
+                stream: true
             )
 
-            if !result.message.content.isEmpty {
-                await onChunk(result.message.content)
+            var request = URLRequest(
+                url: baseURL.appendingPathComponent("api/chat")
+            )
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(body)
+
+            let (bytes, response) = try await session.bytes(for: request)
+            try validate(response)
+
+            for try await line in bytes.lines {
+                let result = try JSONDecoder().decode(
+                    StreamResponseBody.self,
+                    from: Data(line.utf8)
+                )
+
+                if !result.message.content.isEmpty {
+                    await onChunk(result.message.content)
+                }
+                if result.done {
+                    break
+                }
             }
-            if result.done {
-                break
+        } catch {
+            throw ProviderError.map(error, service: "Ollama")
+        }
+    }
+
+    private func validate(_ response: URLResponse) throws {
+        guard let response = response as? HTTPURLResponse else {
+            throw ProviderError.invalidResponse(service: "Ollama")
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            switch response.statusCode {
+            case 404:
+                throw ProviderError.modelNotFound(
+                    service: "Ollama",
+                    model: model
+                )
+            case 408:
+                throw ProviderError.timedOut
+            default:
+                throw ProviderError.requestFailed(
+                    service: "Ollama",
+                    statusCode: response.statusCode
+                )
             }
         }
     }
 
     private func conversationMessages(
-        from history: [(user: String, assistant: String)],
+        from context: ConversationContext,
         mode: Mode
     ) -> [Message] {
         var messages = [
@@ -114,7 +146,14 @@ public struct OllamaProvider: AIProvider {
             )
         ]
 
-        for turn in history.suffix(5) {
+        if let summary = context.summary {
+            messages.append(Message(
+                role: "system",
+                content: "Conversation summary:\n\(summary)"
+            ))
+        }
+
+        for turn in context.recentTurns {
             messages.append(Message(role: "user", content: turn.user))
             if !turn.assistant.isEmpty {
                 messages.append(Message(role: "assistant", content: turn.assistant))

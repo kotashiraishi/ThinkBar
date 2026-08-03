@@ -4,15 +4,38 @@ public struct ConversationRecord: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let user: String
     public let assistant: String
+    public let context: ConversationContextMetadata?
 
     public init(
         id: UUID = UUID(),
         user: String,
-        assistant: String
+        assistant: String,
+        context: ConversationContextMetadata? = nil
     ) {
         self.id = id
         self.user = user
         self.assistant = assistant
+        self.context = context
+    }
+}
+
+public struct ConversationContextMetadata:
+    Codable,
+    Equatable,
+    Sendable
+{
+    public let request: String?
+    public let attachmentContext: String?
+    public let summary: String?
+
+    public init(
+        request: String? = nil,
+        attachmentContext: String? = nil,
+        summary: String? = nil
+    ) {
+        self.request = request
+        self.attachmentContext = attachmentContext
+        self.summary = summary
     }
 }
 
@@ -49,7 +72,7 @@ public struct ConversationStore: Sendable {
         )
 
         let archive = ConversationArchive(
-            version: 1,
+            version: 2,
             conversations: conversations
         )
         let data = try JSONEncoder().encode(archive)

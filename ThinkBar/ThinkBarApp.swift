@@ -11,11 +11,13 @@ import ThinkBarCore
 @main
 struct ThinkBarApp: App {
     @State private var providerConfiguration: ProviderConfiguration
+    @StateObject private var debugLogService: DebugLogService
     private let settingsService: ProviderSettingsService
 
     init() {
         let settingsService = ProviderSettingsService()
         self.settingsService = settingsService
+        _debugLogService = StateObject(wrappedValue: DebugLogService())
         _providerConfiguration = State(initialValue:
             (try? settingsService.configuration())
                 ?? .defaultConfiguration(for: .ollama)
@@ -29,15 +31,22 @@ struct ThinkBarApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(
-                provider: ProviderFactory.makeProvider(from: providerConfiguration)
+                provider: ProviderFactory.makeProvider(from: providerConfiguration),
+                providerConfiguration: providerConfiguration,
+                debugLogRecorder: debugLogService
             )
         }
 
         Settings {
             SettingsView(
                 providerConfiguration: $providerConfiguration,
-                settingsService: settingsService
+                settingsService: settingsService,
+                debugLogService: debugLogService
             )
+        }
+
+        Window("Debug Console", id: "debug-console") {
+            DebugConsoleView(debugLogService: debugLogService)
         }
     }
 }

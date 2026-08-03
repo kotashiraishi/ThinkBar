@@ -15,15 +15,24 @@ struct ContentView: View {
         "txt", "md", "swift", "php", "json", "log", "yaml", "yml", "xml",
     ]
 
-    let provider: any AIProvider
     let conversationStore: ConversationStore
+    let conversationRunner: ConversationRunner
 
     init(
         provider: any AIProvider,
-        conversationStore: ConversationStore = ConversationStore()
+        providerConfiguration: ProviderConfiguration =
+            .defaultConfiguration(for: .ollama),
+        conversationStore: ConversationStore = ConversationStore(),
+        contextBuilder: ConversationContextBuilder = ConversationContextBuilder(),
+        debugLogRecorder: (any DebugLogRecording)? = nil
     ) {
-        self.provider = provider
         self.conversationStore = conversationStore
+        self.conversationRunner = ConversationRunner(
+            provider: provider,
+            configuration: providerConfiguration,
+            contextBuilder: contextBuilder,
+            debugLogRecorder: debugLogRecorder
+        )
     }
 
     @State private var input = ""
@@ -131,7 +140,12 @@ struct ContentView: View {
                                 Text("Assistant")
                                     .foregroundStyle(.secondary)
 
-                                if isThinking && conversation.id == conversations.last?.id {
+                                if let errorMessage = conversation.errorMessage {
+                                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                                        .font(.title3)
+                                        .foregroundStyle(.red)
+                                        .textSelection(.enabled)
+                                } else if isThinking && conversation.id == conversations.last?.id {
                                     HStack {
                                         ProgressView()
                                         Text("Thinking...")
@@ -195,12 +209,19 @@ struct ContentView: View {
 
         let prompt = input
         let mode = selectedMode
-        let requestPrompt = requestPrompt(
-            for: prompt,
+        let attachmentContext = attachmentContext(
             attachment: attachments.first,
             imageAttachment: imageAttachments.first
         )
-        let conversation = Conversation(user: prompt, request: requestPrompt)
+        let requestPrompt = requestPrompt(
+            for: prompt,
+            attachmentContext: attachmentContext
+        )
+        let conversation = Conversation(
+            user: prompt,
+            request: requestPrompt,
+            attachmentContext: attachmentContext
+        )
         conversations.append(conversation)
         input = ""
         isSending = true
@@ -221,11 +242,8 @@ struct ContentView: View {
             }
 
             do {
-                let history = conversations.map {
-                    (user: $0.request, assistant: $0.assistant)
-                }
-                try await provider.stream(
-                    conversationHistory: history,
+                try await conversationRunner.stream(
+                    conversations: conversationRecords(),
                     mode: mode
                 ) { chunk in
                     await buffer.append(chunk)
@@ -252,9 +270,7 @@ struct ContentView: View {
             attachmentError = nil
         } catch {
             input = prompt
-            if conversations.last?.id == conversation.id {
-                conversations.removeLast()
-            }
+            setError(error.localizedDescription, on: conversation.id)
         }
 
         isThinking = false
@@ -277,22 +293,34 @@ struct ContentView: View {
             return Conversation(
                 id: record.id,
                 user: record.user,
-                request: record.user,
+                request: record.context?.request ?? record.user,
                 assistant: record.assistant,
-                renderedAssistant: renderedAssistant
+                renderedAssistant: renderedAssistant,
+                attachmentContext: record.context?.attachmentContext,
+                contextSummary: record.context?.summary
             )
         }
     }
 
     private func saveConversations() {
-        let records = conversations.map {
-            ConversationRecord(
-                id: $0.id,
-                user: $0.user,
-                assistant: $0.assistant
-            )
-        }
-        try? conversationStore.save(records)
+        try? conversationStore.save(conversationRecords())
+    }
+
+    private func conversationRecords() -> [ConversationRecord] {
+        conversations
+            .filter { $0.errorMessage == nil }
+            .map {
+                ConversationRecord(
+                    id: $0.id,
+                    user: $0.user,
+                    assistant: $0.assistant,
+                    context: ConversationContextMetadata(
+                        request: $0.request,
+                        attachmentContext: $0.attachmentContext,
+                        summary: $0.contextSummary
+                    )
+                )
+            }
     }
 
     private func edit(_ message: String) {
@@ -337,9 +365,16 @@ struct ContentView: View {
 
     private func requestPrompt(
         for question: String,
+        attachmentContext: String?
+    ) -> String {
+        guard let attachmentContext else { return question }
+        return "\(attachmentContext)Question:\n\(question)"
+    }
+
+    private func attachmentContext(
         attachment: Attachment?,
         imageAttachment: ImageAttachment?
-    ) -> String {
+    ) -> String? {
         var context = ""
 
         if let attachment {
@@ -361,8 +396,7 @@ struct ContentView: View {
             """
         }
 
-        guard !context.isEmpty else { return question }
-        return "\(context)Question:\n\(question)"
+        return context.isEmpty ? nil : context
     }
 
     private func append(_ text: String, to conversationID: UUID) {
@@ -372,6 +406,15 @@ struct ContentView: View {
         else { return }
 
         conversations[index].assistant += text
+    }
+
+    private func setError(_ message: String, on conversationID: UUID) {
+        guard
+            let index = conversations.indices.last,
+            conversations[index].id == conversationID
+        else { return }
+
+        conversations[index].errorMessage = message
     }
 
     private func renderMarkdown(for conversationID: UUID) {
@@ -502,19 +545,28 @@ private struct Conversation: Identifiable {
     let request: String
     var assistant: String
     var renderedAssistant: AttributedString?
+    var errorMessage: String?
+    var attachmentContext: String?
+    var contextSummary: String?
 
     init(
         id: UUID = UUID(),
         user: String,
         request: String,
         assistant: String = "",
-        renderedAssistant: AttributedString? = nil
+        renderedAssistant: AttributedString? = nil,
+        errorMessage: String? = nil,
+        attachmentContext: String? = nil,
+        contextSummary: String? = nil
     ) {
         self.id = id
         self.user = user
         self.request = request
         self.assistant = assistant
         self.renderedAssistant = renderedAssistant
+        self.errorMessage = errorMessage
+        self.attachmentContext = attachmentContext
+        self.contextSummary = contextSummary
     }
 }
 

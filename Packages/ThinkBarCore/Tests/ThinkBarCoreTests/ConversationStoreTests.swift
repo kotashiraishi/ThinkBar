@@ -26,13 +26,46 @@ struct ConversationStoreTests {
             ),
             ConversationRecord(
                 user: "Second question",
-                assistant: "Second answer"
+                assistant: "Second answer",
+                context: ConversationContextMetadata(
+                    request: "Attached context\nSecond question",
+                    summary: "Earlier discussion summary"
+                )
             ),
         ]
 
         try store.save(conversations)
 
         #expect(try store.load() == conversations)
+    }
+
+    @Test func loadsVersionOneArchiveWithoutContextMetadata() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let fileURL = directory.appendingPathComponent("conversations.json")
+        let id = UUID()
+        let data = Data("""
+        {
+          "version": 1,
+          "conversations": [{
+            "id": "\(id.uuidString)",
+            "user": "Legacy question",
+            "assistant": "Legacy answer"
+          }]
+        }
+        """.utf8)
+        try data.write(to: fileURL)
+        let store = ConversationStore(fileURL: fileURL)
+
+        let conversation = try #require(store.load().first)
+
+        #expect(conversation.id == id)
+        #expect(conversation.user == "Legacy question")
+        #expect(conversation.context == nil)
     }
 }
 
