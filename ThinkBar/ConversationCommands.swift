@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ConversationCommands: Commands {
+    @ObservedObject var conversationActionState: ConversationActionState
+
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("New Conversation") {
@@ -10,6 +12,7 @@ struct ConversationCommands: Commands {
                 )
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
+            .disabled(!conversationActionState.canStartNewConversation)
         }
     }
 }

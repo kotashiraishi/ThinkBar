@@ -12,6 +12,7 @@ import ThinkBarCore
 struct ThinkBarApp: App {
     @State private var providerConfiguration: ProviderConfiguration
     @StateObject private var debugLogService: DebugLogService
+    @StateObject private var conversationActionState = ConversationActionState()
     private let settingsService: ProviderSettingsService
 
     init() {
@@ -33,11 +34,12 @@ struct ThinkBarApp: App {
             ContentView(
                 provider: ProviderFactory.makeProvider(from: providerConfiguration),
                 providerConfiguration: providerConfiguration,
-                debugLogRecorder: debugLogService
+                debugLogRecorder: debugLogService,
+                conversationActionState: conversationActionState
             )
         }
         .commands {
-            ConversationCommands()
+            ConversationCommands(conversationActionState: conversationActionState)
             DebugConsoleCommands(debugLogService: debugLogService)
         }
 

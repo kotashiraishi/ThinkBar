@@ -17,6 +17,7 @@ struct ContentView: View {
 
     let conversationStore: ConversationStore
     let conversationRunner: ConversationRunner
+    @ObservedObject private var conversationActionState: ConversationActionState
 
     init(
         provider: any AIProvider,
@@ -24,7 +25,8 @@ struct ContentView: View {
             .defaultConfiguration(for: .ollama),
         conversationStore: ConversationStore = ConversationStore(),
         contextBuilder: ConversationContextBuilder = ConversationContextBuilder(),
-        debugLogRecorder: (any DebugLogRecording)? = nil
+        debugLogRecorder: (any DebugLogRecording)? = nil,
+        conversationActionState: ConversationActionState
     ) {
         self.conversationStore = conversationStore
         self.conversationRunner = ConversationRunner(
@@ -33,6 +35,7 @@ struct ContentView: View {
             contextBuilder: contextBuilder,
             debugLogRecorder: debugLogRecorder
         )
+        self.conversationActionState = conversationActionState
     }
 
     @State private var input = ""
@@ -46,8 +49,87 @@ struct ContentView: View {
     @State private var selectedMode = ConversationMode.general
     @State private var inputFocusRequest = 0
     @State private var isNearBottom = true
+    @State private var showDiscardComposerConfirmation = false
+    @State private var pendingNavigation: PendingConversationNavigation?
+
+    private enum PendingConversationNavigation: Equatable {
+        case select(UUID)
+        case newConversation
+    }
+
+    private var sidebarItems: [ConversationSidebarItem] {
+        let activeID = conversationSnapshot.activeConversationID
+            ?? conversationSnapshot.activeConversation?.id
+        return conversationSnapshot.conversationsSortedByUpdatedAt.map { conversation in
+            ConversationSidebarItem(
+                id: conversation.id,
+                title: conversation.title,
+                updatedAt: conversation.updatedAt,
+                isActive: conversation.id == activeID
+            )
+        }
+    }
+
+    private var hasUnsavedComposerContent: Bool {
+        !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !attachments.isEmpty
+            || !imageAttachments.isEmpty
+    }
+
+    private var canStartNewConversation: Bool {
+        conversationSnapshot.canStartNewConversation && !isSending
+    }
 
     var body: some View {
+        NavigationSplitView {
+            ConversationSidebarView(
+                items: sidebarItems,
+                selectedConversationID: conversationSnapshot.activeConversationID
+                    ?? conversationSnapshot.activeConversation?.id,
+                isInteractionDisabled: isSending,
+                canStartNewConversation: canStartNewConversation,
+                onSelect: requestSelectConversation,
+                onNewConversation: requestStartNewConversation
+            )
+        } detail: {
+            detailContent
+        }
+        .confirmationDialog(
+            "Discard unsaved message?",
+            isPresented: $showDiscardComposerConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard", role: .destructive) {
+                guard let pendingNavigation else { return }
+                performNavigation(pendingNavigation, discardComposer: true)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingNavigation = nil
+            }
+        } message: {
+            Text("Your unsent composer text or attachments will be lost.")
+        }
+        .onChange(of: conversationSnapshot) { _, _ in
+            syncConversationActionState()
+        }
+        .onChange(of: isSending) { _, _ in
+            syncConversationActionState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
+            focusInput()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .startNewThinkBarConversation)
+        ) { _ in
+            requestStartNewConversation()
+        }
+        .task {
+            loadConversations()
+            syncConversationActionState()
+        }
+    }
+
+    private var detailContent: some View {
         VStack {
             Picker("Mode", selection: $selectedMode) {
                 ForEach(ConversationMode.builtIn) { mode in
@@ -167,9 +249,9 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New Conversation", systemImage: "square.and.pencil") {
-                    startNewConversation()
+                    requestStartNewConversation()
                 }
-                .disabled(isSending)
+                .disabled(!canStartNewConversation)
                 .help("Start a new conversation")
             }
         }
@@ -177,36 +259,102 @@ struct ContentView: View {
         .dropDestination(for: URL.self) { urls, _ in
             loadAttachment(from: urls.first)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
-            focusInput()
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .startNewThinkBarConversation)
-        ) { _ in
-            startNewConversation()
-        }
-        .task {
-            loadConversations()
-        }
     }
 
-    private func startNewConversation() {
+    private func requestSelectConversation(_ id: UUID) {
         guard !isSending else { return }
+        guard id != conversationSnapshot.activeConversation?.id else { return }
+
+        let navigation = PendingConversationNavigation.select(id)
+        if hasUnsavedComposerContent {
+            pendingNavigation = navigation
+            showDiscardComposerConfirmation = true
+            return
+        }
+        performNavigation(navigation, discardComposer: true)
+    }
+
+    private func requestStartNewConversation() {
+        guard canStartNewConversation else { return }
+
+        let navigation = PendingConversationNavigation.newConversation
+        if hasUnsavedComposerContent {
+            pendingNavigation = navigation
+            showDiscardComposerConfirmation = true
+            return
+        }
+        performNavigation(navigation, discardComposer: true)
+    }
+
+    private func syncConversationActionState() {
+        conversationActionState.update(
+            canStartNewConversation: canStartNewConversation
+        )
+    }
+
+    private func performNavigation(
+        _ navigation: PendingConversationNavigation,
+        discardComposer: Bool
+    ) {
+        pendingNavigation = nil
 
         var snapshot = conversationSnapshot
-        snapshot.startNewConversation(
-            persistingActiveTurns: conversationRecords()
-        )
+        switch navigation {
+        case let .select(id):
+            guard snapshot.activateConversation(
+                id: id,
+                persistingActiveTurns: conversationRecords()
+            ) else { return }
+        case .newConversation:
+            snapshot.startNewConversation(
+                persistingActiveTurns: conversationRecords()
+            )
+        }
         conversationSnapshot = snapshot
         try? conversationStore.save(snapshot)
+        presentActiveConversation(clearComposer: discardComposer)
+    }
 
-        conversations = []
+    private func presentActiveConversation(clearComposer: Bool) {
+        let turns = conversationSnapshot.activeConversation?.turnsForContext ?? []
+        conversations = turns.map(conversationItem(from:))
+        if clearComposer {
+            clearComposerState()
+        }
+        isNearBottom = true
+        focusInput()
+    }
+
+    private func clearComposerState() {
         input = ""
         attachments.removeAll()
         imageAttachments.removeAll()
         attachmentError = nil
-        isNearBottom = true
-        focusInput()
+    }
+
+    private func conversationItem(
+        from record: ConversationRecord
+    ) -> ConversationItem {
+        let renderedAssistant: AttributedString?
+        if shouldRenderMarkdown(record.assistant) {
+            renderedAssistant =
+                AssistantResponseFormatter.markdownPreservingWhitespace(
+                    record.assistant
+                )
+        } else {
+            renderedAssistant = nil
+        }
+        return ConversationItem(
+            id: record.id,
+            user: record.user,
+            request: record.context?.request ?? record.user,
+            assistant: record.assistant,
+            renderedAssistant: renderedAssistant,
+            attachmentContext: record.context?.attachmentContext,
+            contextSummary: record.context?.summary,
+            summaryCoveredConversationCount:
+                record.context?.summaryCoveredConversationCount
+        )
     }
 
     private func scrollConversationToBottom(
@@ -300,36 +448,16 @@ struct ContentView: View {
     }
 
     private func loadConversations() {
-        guard conversations.isEmpty, let snapshot = try? conversationStore.load() else {
-            return
-        }
+        guard conversations.isEmpty else { return }
 
+        var snapshot = (try? conversationStore.load()) ?? .empty
+        let wasEmpty = snapshot.conversations.isEmpty
+        snapshot.ensureAtLeastOneConversation()
         conversationSnapshot = snapshot
-        let active = snapshot.activeConversation
-        let turns = active?.turnsForContext ?? []
-
-        conversations = turns.map { record in
-            let renderedAssistant: AttributedString?
-            if shouldRenderMarkdown(record.assistant) {
-                renderedAssistant =
-                    AssistantResponseFormatter.markdownPreservingWhitespace(
-                        record.assistant
-                    )
-            } else {
-                renderedAssistant = nil
-            }
-            return ConversationItem(
-                id: record.id,
-                user: record.user,
-                request: record.context?.request ?? record.user,
-                assistant: record.assistant,
-                renderedAssistant: renderedAssistant,
-                attachmentContext: record.context?.attachmentContext,
-                contextSummary: record.context?.summary,
-                summaryCoveredConversationCount:
-                    record.context?.summaryCoveredConversationCount
-            )
+        if wasEmpty {
+            try? conversationStore.save(snapshot)
         }
+        presentActiveConversation(clearComposer: true)
     }
 
     private func saveConversations() {
@@ -489,7 +617,10 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView(provider: FakeAIProvider())
+    ContentView(
+        provider: FakeAIProvider(),
+        conversationActionState: ConversationActionState()
+    )
 }
 
 private struct ConversationItem: Identifiable {

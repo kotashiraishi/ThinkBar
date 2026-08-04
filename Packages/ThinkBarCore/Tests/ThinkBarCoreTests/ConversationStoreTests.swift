@@ -240,7 +240,7 @@ struct ConversationStoreTests {
 
         let loaded = try store.load()
         #expect(loaded.conversations.count == 2)
-        #expect(loaded.activeConversationID == created.id)
+        #expect(loaded.activeConversationID == created?.id)
         #expect(loaded.activeConversation?.turns.isEmpty == true)
         #expect(loaded.activeConversation?.summary == "")
         #expect(loaded.activeConversation?.summaryCoveredTurnCount == 0)
@@ -251,6 +251,89 @@ struct ConversationStoreTests {
         #expect(previous.turns.count == 1)
         #expect(previous.summary == "Old summary")
         #expect(previous.summaryCoveredTurnCount == 1)
+    }
+
+    @Test func conversationsSortedByUpdatedAtDescending() {
+        let older = Conversation(
+            updatedAt: Date(timeIntervalSince1970: 1),
+            title: "Older"
+        )
+        let newer = Conversation(
+            updatedAt: Date(timeIntervalSince1970: 2),
+            title: "Newer"
+        )
+        let snapshot = ConversationStoreSnapshot(
+            conversations: [older, newer]
+        )
+
+        #expect(
+            snapshot.conversationsSortedByUpdatedAt.map(\.title)
+                == ["Newer", "Older"]
+        )
+    }
+
+    @Test func activateConversationPersistsTurnsAndSwitchesActive() {
+        var snapshot = ConversationStoreSnapshot.empty
+        let firstTurns = [
+            ConversationRecord(user: "First", assistant: "A"),
+        ]
+        snapshot.replaceActiveTurns(firstTurns)
+        let firstID = snapshot.activeConversationID
+        snapshot.startNewConversation(persistingActiveTurns: firstTurns)
+        let secondID = snapshot.activeConversationID
+
+        let switched = snapshot.activateConversation(
+            id: firstID!,
+            persistingActiveTurns: [
+                ConversationRecord(user: "Second draft", assistant: "B"),
+            ]
+        )
+
+        #expect(switched)
+        #expect(snapshot.activeConversationID == firstID)
+        #expect(
+            snapshot.conversations.first { $0.id == secondID }?.turns.first?.user
+                == "Second draft"
+        )
+        #expect(snapshot.activeConversation?.turns.first?.user == "First")
+    }
+
+    @Test func ensureAtLeastOneConversationCreatesWhenEmpty() {
+        var snapshot = ConversationStoreSnapshot.empty
+        let conversation = snapshot.ensureAtLeastOneConversation()
+
+        #expect(snapshot.conversations.count == 1)
+        #expect(snapshot.activeConversationID == conversation.id)
+        #expect(conversation.title == "New Conversation")
+    }
+
+    @Test func canStartNewConversationRequiresActiveTurns() {
+        var snapshot = ConversationStoreSnapshot.empty
+        snapshot.ensureAtLeastOneConversation()
+        #expect(snapshot.canStartNewConversation == false)
+
+        snapshot.replaceActiveTurns([
+            ConversationRecord(user: "Question", assistant: "Answer"),
+        ])
+        #expect(snapshot.canStartNewConversation == true)
+
+        snapshot.startNewConversation(
+            persistingActiveTurns: [
+                ConversationRecord(user: "Question", assistant: "Answer"),
+            ]
+        )
+        #expect(snapshot.canStartNewConversation == false)
+        #expect(snapshot.conversations.count == 2)
+    }
+
+    @Test func startNewConversationDoesNothingWhenActiveIsEmpty() {
+        var snapshot = ConversationStoreSnapshot.empty
+        let empty = snapshot.ensureAtLeastOneConversation()
+
+        let result = snapshot.startNewConversation()
+
+        #expect(result?.id == empty.id)
+        #expect(snapshot.conversations.count == 1)
     }
 }
 

@@ -194,6 +194,16 @@ public struct ConversationStoreSnapshot: Codable, Equatable, Sendable {
             ?? conversations.first
     }
 
+    public var conversationsSortedByUpdatedAt: [Conversation] {
+        conversations.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// New Conversation is allowed only when the active conversation already has turns.
+    public var canStartNewConversation: Bool {
+        guard let activeConversation else { return false }
+        return !activeConversation.turns.isEmpty
+    }
+
     public mutating func selectActiveConversation(id: UUID) {
         guard conversations.contains(where: { $0.id == id }) else { return }
         activeConversationID = id
@@ -210,12 +220,56 @@ public struct ConversationStoreSnapshot: Codable, Equatable, Sendable {
         activeConversationID = conversation.id
     }
 
+    /// Ensures there is an active conversation, creating an empty one if needed.
+    @discardableResult
+    public mutating func ensureAtLeastOneConversation(
+        now: Date = Date()
+    ) -> Conversation {
+        if let active = activeConversation {
+            if activeConversationID == nil {
+                activeConversationID = active.id
+            }
+            return active
+        }
+
+        let conversation = Conversation.makeNew(now: now)
+        upsert(conversation)
+        return conversation
+    }
+
+    /// Persists the current active turns, then selects another conversation.
+    @discardableResult
+    public mutating func activateConversation(
+        id: UUID,
+        persistingActiveTurns turns: [ConversationRecord] = [],
+        now: Date = Date()
+    ) -> Bool {
+        guard conversations.contains(where: { $0.id == id }) else {
+            return false
+        }
+        guard activeConversation?.id != id else {
+            return true
+        }
+
+        if activeConversation != nil || !turns.isEmpty {
+            replaceActiveTurns(turns, updatedAt: now)
+        }
+        selectActiveConversation(id: id)
+        return true
+    }
+
     /// Persists the current active turns (if any), then creates and selects a new conversation.
+    /// Returns `nil` when the active conversation has no turns to avoid empty duplicates.
     @discardableResult
     public mutating func startNewConversation(
         persistingActiveTurns turns: [ConversationRecord] = [],
         now: Date = Date()
-    ) -> Conversation {
+    ) -> Conversation? {
+        let hasTurns = !turns.isEmpty || !(activeConversation?.turns.isEmpty ?? true)
+        guard hasTurns else {
+            return activeConversation
+        }
+
         if activeConversation != nil || !turns.isEmpty {
             replaceActiveTurns(turns, updatedAt: now)
         }
