@@ -44,6 +44,7 @@ struct ContentView: View {
     @State private var isThinking = false
     @State private var selectedMode = ConversationMode.general
     @State private var inputFocusRequest = 0
+    @State private var isNearBottom = true
 
     var body: some View {
         VStack {
@@ -54,58 +55,6 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(.segmented)
-
-            ForEach(attachments) { attachment in
-                HStack {
-                    Text("📎 \(attachment.fileName)")
-                    Spacer()
-                    Button {
-                        attachments.removeAll { $0.id == attachment.id }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isSending)
-                    .accessibilityLabel("Remove \(attachment.fileName)")
-                }
-            }
-
-            ForEach(imageAttachments) { imageAttachment in
-                HStack {
-                    Text("🖼 Screenshot")
-                    Spacer()
-                    Button {
-                        imageAttachments.removeAll { $0.id == imageAttachment.id }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isSending)
-                    .accessibilityLabel("Remove screenshot")
-                }
-            }
-
-            if let attachmentError {
-                Text(attachmentError)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            IMESafeTextEditor(
-                text: $input,
-                isEnabled: !isSending,
-                focusRequest: inputFocusRequest,
-                onSend: {
-                    Task { await send() }
-                },
-                onPasteImage: pasteImageFromClipboard
-            )
-                .frame(height: 44)
-
-            Button("Send") {
-                Task { await send() }
-            }
-            .disabled(isSending)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -175,14 +124,19 @@ struct ContentView: View {
 
                         Color.clear
                             .frame(height: 1)
-                            .id("responseBottom")
+                            .id(ConversationScrollMetrics.bottomAnchorID)
                     }
                 }
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    ConversationScrollMetrics.isNearBottom(geometry)
+                } action: { _, newValue in
+                    isNearBottom = newValue
+                }
                 .onChange(of: conversations.count) {
-                    proxy.scrollTo("responseBottom", anchor: .bottom)
+                    scrollConversationToBottom(using: proxy, force: true)
                 }
                 .onChange(of: conversations.last?.assistant) {
-                    proxy.scrollTo("responseBottom", anchor: .bottom)
+                    scrollConversationToBottom(using: proxy, force: false)
                 }
                 .frame(maxHeight: .infinity)
                 .background {
@@ -194,6 +148,19 @@ struct ContentView: View {
                         .stroke(Color.secondary.opacity(0.2))
                 }
             }
+
+            ComposerView(
+                input: $input,
+                attachments: $attachments,
+                imageAttachments: $imageAttachments,
+                attachmentError: attachmentError,
+                isSending: isSending,
+                focusRequest: inputFocusRequest,
+                onSend: {
+                    Task { await send() }
+                },
+                onPasteImage: pasteImageFromClipboard
+            )
         }
         .padding()
         .contentShape(Rectangle())
@@ -205,6 +172,17 @@ struct ContentView: View {
         }
         .task {
             loadConversations()
+        }
+    }
+
+    private func scrollConversationToBottom(
+        using proxy: ScrollViewProxy,
+        force: Bool
+    ) {
+        guard force || isNearBottom else { return }
+        proxy.scrollTo(ConversationScrollMetrics.bottomAnchorID, anchor: .bottom)
+        if force {
+            isNearBottom = true
         }
     }
 
@@ -466,102 +444,6 @@ struct ContentView: View {
 
     private func shouldRenderMarkdown(_ text: String) -> Bool {
         text.contains("```")
-    }
-}
-
-private struct IMESafeTextEditor: NSViewRepresentable {
-    @Binding var text: String
-
-    let isEnabled: Bool
-    let focusRequest: Int
-    let onSend: () -> Void
-    let onPasteImage: () -> Bool
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let textView = SendingTextView()
-        textView.delegate = context.coordinator
-        textView.font = .systemFont(ofSize: 20)
-        textView.isRichText = false
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainerInset = NSSize(width: 4, height: 8)
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.borderType = .noBorder
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? SendingTextView else { return }
-
-        if textView.string != text {
-            textView.string = text
-        }
-        textView.isEditable = isEnabled
-        textView.onSend = onSend
-        textView.onPasteImage = onPasteImage
-
-        if context.coordinator.lastFocusRequest != focusRequest {
-            context.coordinator.lastFocusRequest = focusRequest
-            scrollView.window?.makeFirstResponder(textView)
-        }
-    }
-
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        private var text: Binding<String>
-        var lastFocusRequest: Int?
-
-        init(text: Binding<String>) {
-            self.text = text
-        }
-
-        func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
-            text.wrappedValue = textView.string
-        }
-    }
-}
-
-private final class SendingTextView: NSTextView {
-    private static let returnKeyCode: UInt16 = 36
-    private static let keypadEnterKeyCode: UInt16 = 76
-
-    var onSend: (() -> Void)?
-    var onPasteImage: (() -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        let isEnter = event.keyCode == Self.returnKeyCode
-            || event.keyCode == Self.keypadEnterKeyCode
-        guard isEnter, !hasMarkedText() else {
-            super.keyDown(with: event)
-            return
-        }
-
-        let modifiers = event.modifierFlags.intersection([
-            .command, .control, .option, .shift,
-        ])
-        if (modifiers.isEmpty || modifiers == .command), let onSend {
-            onSend()
-            return
-        }
-
-        super.keyDown(with: event)
-    }
-
-    override func paste(_ sender: Any?) {
-        if onPasteImage?() == true {
-            return
-        }
-        super.paste(sender)
     }
 }
 
