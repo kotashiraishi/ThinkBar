@@ -72,6 +72,17 @@ public struct Conversation: Codable, Equatable, Identifiable, Sendable {
         self.summaryCoveredTurnCount = summaryCoveredTurnCount
     }
 
+    public static func makeNew(now: Date = Date()) -> Conversation {
+        Conversation(
+            createdAt: now,
+            updatedAt: now,
+            title: "New Conversation",
+            turns: [],
+            summary: "",
+            summaryCoveredTurnCount: 0
+        )
+    }
+
     public static func migrating(
         from turns: [ConversationRecord],
         createdAt: Date = Date(),
@@ -197,6 +208,21 @@ public struct ConversationStoreSnapshot: Codable, Equatable, Sendable {
             conversations.append(conversation)
         }
         activeConversationID = conversation.id
+    }
+
+    /// Persists the current active turns (if any), then creates and selects a new conversation.
+    @discardableResult
+    public mutating func startNewConversation(
+        persistingActiveTurns turns: [ConversationRecord] = [],
+        now: Date = Date()
+    ) -> Conversation {
+        if activeConversation != nil || !turns.isEmpty {
+            replaceActiveTurns(turns, updatedAt: now)
+        }
+
+        let conversation = Conversation.makeNew(now: now)
+        upsert(conversation)
+        return conversation
     }
 
     public mutating func replaceActiveTurns(

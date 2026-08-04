@@ -84,4 +84,7 @@ final class GlobalShortcutController {
 
 extension Notification.Name {
     static let focusThinkBarInput = Notification.Name("focusThinkBarInput")
+    static let startNewThinkBarConversation = Notification.Name(
+        "startNewThinkBarConversation"
+    )
 }

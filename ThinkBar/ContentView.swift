@@ -164,6 +164,15 @@ struct ContentView: View {
             )
         }
         .padding()
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("New Conversation", systemImage: "square.and.pencil") {
+                    startNewConversation()
+                }
+                .disabled(isSending)
+                .help("Start a new conversation")
+            }
+        }
         .contentShape(Rectangle())
         .dropDestination(for: URL.self) { urls, _ in
             loadAttachment(from: urls.first)
@@ -171,9 +180,33 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusThinkBarInput)) { _ in
             focusInput()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .startNewThinkBarConversation)
+        ) { _ in
+            startNewConversation()
+        }
         .task {
             loadConversations()
         }
+    }
+
+    private func startNewConversation() {
+        guard !isSending else { return }
+
+        var snapshot = conversationSnapshot
+        snapshot.startNewConversation(
+            persistingActiveTurns: conversationRecords()
+        )
+        conversationSnapshot = snapshot
+        try? conversationStore.save(snapshot)
+
+        conversations = []
+        input = ""
+        attachments.removeAll()
+        imageAttachments.removeAll()
+        attachmentError = nil
+        isNearBottom = true
+        focusInput()
     }
 
     private func scrollConversationToBottom(

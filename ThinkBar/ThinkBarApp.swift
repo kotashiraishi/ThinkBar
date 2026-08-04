@@ -37,6 +37,7 @@ struct ThinkBarApp: App {
             )
         }
         .commands {
+            ConversationCommands()
             DebugConsoleCommands(debugLogService: debugLogService)
         }
 

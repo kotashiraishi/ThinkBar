@@ -195,6 +195,63 @@ struct ConversationStoreTests {
         #expect(conversation.summary == "Kept summary")
         #expect(conversation.summaryCoveredTurnCount == 2)
     }
+
+    @Test func makeNewConversationStartsEmpty() {
+        let conversation = Conversation.makeNew()
+
+        #expect(conversation.title == "New Conversation")
+        #expect(conversation.turns.isEmpty)
+        #expect(conversation.summary == "")
+        #expect(conversation.summaryCoveredTurnCount == 0)
+    }
+
+    @Test func startNewConversationKeepsPreviousAndSwitchesActive() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ConversationStore(
+            fileURL: directory.appendingPathComponent("conversations.json")
+        )
+        var snapshot = ConversationStoreSnapshot.empty
+        snapshot.replaceActiveTurns([
+            ConversationRecord(
+                user: "Keep me",
+                assistant: "Still here",
+                context: ConversationContextMetadata(
+                    summary: "Old summary",
+                    summaryCoveredConversationCount: 1
+                )
+            ),
+        ])
+        let previousID = try #require(snapshot.activeConversationID)
+
+        let created = snapshot.startNewConversation(
+            persistingActiveTurns: [
+                ConversationRecord(
+                    user: "Keep me",
+                    assistant: "Still here",
+                    context: ConversationContextMetadata(
+                        summary: "Old summary",
+                        summaryCoveredConversationCount: 1
+                    )
+                ),
+            ]
+        )
+        try store.save(snapshot)
+
+        let loaded = try store.load()
+        #expect(loaded.conversations.count == 2)
+        #expect(loaded.activeConversationID == created.id)
+        #expect(loaded.activeConversation?.turns.isEmpty == true)
+        #expect(loaded.activeConversation?.summary == "")
+        #expect(loaded.activeConversation?.summaryCoveredTurnCount == 0)
+
+        let previous = try #require(
+            loaded.conversations.first { $0.id == previousID }
+        )
+        #expect(previous.turns.count == 1)
+        #expect(previous.summary == "Old summary")
+        #expect(previous.summaryCoveredTurnCount == 1)
+    }
 }
 
 private func temporaryDirectory() -> URL {
