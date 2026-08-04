@@ -58,4 +58,21 @@ struct ConversationContextBuilderTests {
         #expect(context.summary == "Latest summary")
         #expect(context.recentTurns.count == 2)
     }
+
+    @Test func buildsContextFromConversationEntitySummary() {
+        let conversation = Conversation(
+            turns: [
+                ConversationRecord(user: "user1", assistant: "assistant1"),
+                ConversationRecord(user: "user2", assistant: "assistant2"),
+            ],
+            summary: " Conversation memory ",
+            summaryCoveredTurnCount: 2
+        )
+
+        let context = ConversationContextBuilder().build(from: conversation)
+
+        #expect(context.summary == "Conversation memory")
+        #expect(context.recentTurns.count == 2)
+        #expect(context.recentTurns.last?.user == "user2")
+    }
 }

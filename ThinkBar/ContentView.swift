@@ -39,7 +39,8 @@ struct ContentView: View {
     @State private var attachments: [Attachment] = []
     @State private var imageAttachments: [ImageAttachment] = []
     @State private var attachmentError: String?
-    @State private var conversations: [Conversation] = []
+    @State private var conversations: [ConversationItem] = []
+    @State private var conversationSnapshot = ConversationStoreSnapshot.empty
     @State private var isSending = false
     @State private var isThinking = false
     @State private var selectedMode = ConversationMode.general
@@ -199,7 +200,7 @@ struct ContentView: View {
             for: prompt,
             attachmentContext: attachmentContext
         )
-        let conversation = Conversation(
+        let conversation = ConversationItem(
             user: prompt,
             request: requestPrompt,
             attachmentContext: attachmentContext
@@ -266,11 +267,15 @@ struct ContentView: View {
     }
 
     private func loadConversations() {
-        guard conversations.isEmpty, let records = try? conversationStore.load() else {
+        guard conversations.isEmpty, let snapshot = try? conversationStore.load() else {
             return
         }
 
-        conversations = records.map { record in
+        conversationSnapshot = snapshot
+        let active = snapshot.activeConversation
+        let turns = active?.turnsForContext ?? []
+
+        conversations = turns.map { record in
             let renderedAssistant: AttributedString?
             if shouldRenderMarkdown(record.assistant) {
                 renderedAssistant =
@@ -280,7 +285,7 @@ struct ContentView: View {
             } else {
                 renderedAssistant = nil
             }
-            return Conversation(
+            return ConversationItem(
                 id: record.id,
                 user: record.user,
                 request: record.context?.request ?? record.user,
@@ -295,7 +300,10 @@ struct ContentView: View {
     }
 
     private func saveConversations() {
-        try? conversationStore.save(conversationRecords())
+        var snapshot = conversationSnapshot
+        snapshot.replaceActiveTurns(conversationRecords())
+        conversationSnapshot = snapshot
+        try? conversationStore.save(snapshot)
     }
 
     private func conversationRecords() -> [ConversationRecord] {
@@ -451,7 +459,7 @@ struct ContentView: View {
     ContentView(provider: FakeAIProvider())
 }
 
-private struct Conversation: Identifiable {
+private struct ConversationItem: Identifiable {
     let id: UUID
     let user: String
     let request: String

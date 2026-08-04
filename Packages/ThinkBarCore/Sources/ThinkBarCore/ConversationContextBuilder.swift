@@ -60,6 +60,18 @@ public struct ConversationContextBuilder: Sendable {
         buildWithStatistics(from: conversations).context
     }
 
+    public func build(
+        from conversation: Conversation
+    ) -> ConversationContext {
+        buildWithStatistics(from: conversation).context
+    }
+
+    public func buildWithStatistics(
+        from conversation: Conversation
+    ) -> ConversationContextBuildResult {
+        buildWithStatistics(from: conversation.turnsForContext)
+    }
+
     public func buildWithStatistics(
         from conversations: [ConversationRecord]
     ) -> ConversationContextBuildResult {
