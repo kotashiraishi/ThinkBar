@@ -5,6 +5,8 @@ import ThinkBarCore
 final class DebugLogService: ObservableObject, DebugLogRecording {
     @Published private(set) var isEnabled = false
     @Published private(set) var entries: [DebugLogEntry] = []
+    /// Experiment B: render assistant messages as plain Text without Markdown/AttributedString.
+    @Published var bypassAssistantMarkdown = false
 
     func loggingEnabled() async -> Bool {
         isEnabled
@@ -20,6 +22,7 @@ final class DebugLogService: ObservableObject, DebugLogRecording {
 
         self.isEnabled = isEnabled
         if !isEnabled {
+            bypassAssistantMarkdown = false
             clear()
         }
     }

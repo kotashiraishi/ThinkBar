@@ -34,7 +34,7 @@ struct ThinkBarApp: App {
             ContentView(
                 provider: ProviderFactory.makeProvider(from: providerConfiguration),
                 providerConfiguration: providerConfiguration,
-                debugLogRecorder: debugLogService,
+                debugLogService: debugLogService,
                 conversationActionState: conversationActionState
             )
         }

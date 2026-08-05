@@ -18,6 +18,7 @@ struct ContentView: View {
     let conversationStore: ConversationStore
     let conversationRunner: ConversationRunner
     private let debugLogRecorder: (any DebugLogRecording)?
+    @ObservedObject private var debugLogService: DebugLogService
     @ObservedObject private var conversationActionState: ConversationActionState
 
     init(
@@ -26,16 +27,17 @@ struct ContentView: View {
             .defaultConfiguration(for: .ollama),
         conversationStore: ConversationStore = ConversationStore(),
         contextBuilder: ConversationContextBuilder = ConversationContextBuilder(),
-        debugLogRecorder: (any DebugLogRecording)? = nil,
+        debugLogService: DebugLogService,
         conversationActionState: ConversationActionState
     ) {
         self.conversationStore = conversationStore
-        self.debugLogRecorder = debugLogRecorder
+        self.debugLogService = debugLogService
+        self.debugLogRecorder = debugLogService
         self.conversationRunner = ConversationRunner(
             provider: provider,
             configuration: providerConfiguration,
             contextBuilder: contextBuilder,
-            debugLogRecorder: debugLogRecorder
+            debugLogRecorder: debugLogService
         )
         self.conversationActionState = conversationActionState
     }
@@ -54,6 +56,8 @@ struct ContentView: View {
     @State private var isNearBottom = true
     @State private var showDiscardComposerConfirmation = false
     @State private var pendingNavigation: PendingConversationNavigation?
+    @State private var pendingRenderingReport: ConversationRenderingPerformanceReport?
+    @State private var layoutProbeStartedAt: ContinuousClock.Instant?
 
     private enum PendingConversationNavigation: Equatable {
         case select(UUID)
@@ -200,7 +204,8 @@ struct ContentView: View {
                                         Text("Thinking...")
                                     }
                                     .font(.title3)
-                                } else if let renderedAssistant = conversation.renderedAssistant {
+                                } else if !debugLogService.bypassAssistantMarkdown,
+                                          let renderedAssistant = conversation.renderedAssistant {
                                     Text(renderedAssistant)
                                         .font(.title3)
                                         .textSelection(.enabled)
@@ -224,6 +229,10 @@ struct ContentView: View {
                         Color.clear
                             .frame(height: 1)
                             .id(ConversationScrollMetrics.bottomAnchorID)
+                    }
+                    .id(conversationSnapshot.activeConversationID)
+                    .onAppear {
+                        completeLayoutProbeIfNeeded()
                     }
                 }
                 .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -381,7 +390,11 @@ struct ContentView: View {
         let presentation = presentActiveConversation(
             clearComposer: discardComposer,
             turns: active?.turnsForContext ?? [],
-            stopwatch: stopwatch
+            conversationID: active?.id,
+            conversationTitle: active?.title
+                ?? ConversationTitleGenerator.placeholder,
+            stopwatch: stopwatch,
+            instrumentRendering: true
         )
         timings.buildDisplayItems = presentation.buildDisplayItems
         timings.prepareVisibleTurns = presentation.prepareVisibleTurns
@@ -414,14 +427,24 @@ struct ContentView: View {
             timings: timings
         )
 
+        if let renderingReport = presentation.renderingReport {
+            pendingRenderingReport = renderingReport
+            layoutProbeStartedAt = ContinuousClock().now
+        }
+
         recordSwitchPerformance(report, stopwatch: stopwatch)
     }
 
     private func presentActiveConversation(clearComposer: Bool) {
+        let active = conversationSnapshot.activeConversation
         _ = presentActiveConversation(
             clearComposer: clearComposer,
-            turns: conversationSnapshot.activeConversation?.turnsForContext ?? [],
-            stopwatch: nil
+            turns: active?.turnsForContext ?? [],
+            conversationID: active?.id,
+            conversationTitle: active?.title
+                ?? ConversationTitleGenerator.placeholder,
+            stopwatch: nil,
+            instrumentRendering: false
         )
     }
 
@@ -429,12 +452,16 @@ struct ContentView: View {
         var buildDisplayItems: Duration = .zero
         var prepareVisibleTurns: Duration = .zero
         var uiStateUpdateRequested: Duration = .zero
+        var renderingReport: ConversationRenderingPerformanceReport?
     }
 
     private func presentActiveConversation(
         clearComposer: Bool,
         turns: [ConversationRecord],
-        stopwatch: ConversationSwitchStopwatch?
+        conversationID: UUID?,
+        conversationTitle: String,
+        stopwatch: ConversationSwitchStopwatch?,
+        instrumentRendering: Bool
     ) -> PresentationTimings {
         var timings = PresentationTimings()
         let measure = { (work: () -> Void) -> Duration in
@@ -450,10 +477,26 @@ struct ContentView: View {
                 conversationItem(from: $0, renderMarkdown: false)
             }
         }
+
+        var renderingReport: ConversationRenderingPerformanceReport?
         timings.prepareVisibleTurns = measure {
             renderingWindow.reset(totalCount: conversations.count)
-            renderMarkdownForVisibleConversations()
+            if instrumentRendering, debugLogService.isEnabled {
+                renderingReport = renderMarkdownForVisibleConversationsMeasured(
+                    conversationID: conversationID,
+                    conversationTitle: conversationTitle,
+                    viewConstruction: timings.buildDisplayItems
+                )
+            } else {
+                renderMarkdownForVisibleConversations()
+            }
         }
+        if var report = renderingReport {
+            report.prepareVisibleTurns = timings.prepareVisibleTurns
+            renderingReport = report
+        }
+        timings.renderingReport = renderingReport
+
         timings.uiStateUpdateRequested = measure {
             if clearComposer {
                 clearComposerState()
@@ -464,14 +507,43 @@ struct ContentView: View {
         return timings
     }
 
+    private func completeLayoutProbeIfNeeded() {
+        guard
+            let startedAt = layoutProbeStartedAt,
+            var report = pendingRenderingReport
+        else {
+            return
+        }
+
+        report.layoutFirstAppearance = ContinuousClock().now - startedAt
+        pendingRenderingReport = report
+        layoutProbeStartedAt = nil
+    }
+
     private func recordSwitchPerformance(
         _ report: ConversationSwitchPerformanceReport,
         stopwatch: ConversationSwitchStopwatch
     ) {
         let recorder = debugLogRecorder
         Task {
-            guard await recorder?.loggingEnabled() == true else { return }
+            guard await recorder?.loggingEnabled() == true else {
+                await MainActor.run {
+                    pendingRenderingReport = nil
+                    layoutProbeStartedAt = nil
+                }
+                return
+            }
+
+            // Allow layout onAppear and the next render pass to complete.
+            for _ in 0..<8 {
+                await Task.yield()
+                let hasLayout = await MainActor.run {
+                    pendingRenderingReport?.layoutFirstAppearance != nil
+                }
+                if hasLayout { break }
+            }
             await Task.yield()
+
             var finalized = report
             let firstRenderCompleted = stopwatch.elapsed()
             finalized.timings.firstRenderCompleted = firstRenderCompleted
@@ -479,6 +551,23 @@ struct ContentView: View {
                 finalized.timings.total = firstRenderCompleted
             }
             await recorder?.record(finalized.asDebugLogEntry())
+
+            let renderingEntry = await MainActor.run { () -> DebugLogEntry? in
+                guard var renderingReport = pendingRenderingReport else {
+                    return nil
+                }
+                renderingReport.firstRenderCompleted = firstRenderCompleted
+                if renderingReport.layoutFirstAppearance == nil {
+                    renderingReport.layoutFirstAppearance =
+                        firstRenderCompleted
+                }
+                pendingRenderingReport = nil
+                layoutProbeStartedAt = nil
+                return renderingReport.asDebugLogEntry()
+            }
+            if let renderingEntry {
+                await recorder?.record(renderingEntry)
+            }
         }
     }
 
@@ -546,11 +635,95 @@ struct ContentView: View {
         renderMarkdown(in: start..<conversations.count)
     }
 
+    private func renderMarkdownForVisibleConversationsMeasured(
+        conversationID: UUID?,
+        conversationTitle: String,
+        viewConstruction: Duration
+    ) -> ConversationRenderingPerformanceReport {
+        let experiment: ConversationRenderingPerformanceReport.Experiment =
+            debugLogService.bypassAssistantMarkdown
+            ? .plainAssistantText
+            : .normalMarkdown
+        let start = renderingWindow.visibleStartIndex(
+            totalCount: conversations.count
+        )
+        var turnTimings: [ConversationRenderingPerformanceReport.TurnTiming] = []
+        var markdownParseTotal = Duration.zero
+        var attributedTotal = Duration.zero
+        var formatterTotal = Duration.zero
+        var formattedTurnCount = 0
+
+        for index in start..<conversations.count {
+            let timing = renderMarkdownMeasured(at: index)
+            turnTimings.append(timing)
+            markdownParseTotal += timing.markdownParse
+            attributedTotal += timing.attributedStringCreation
+            formatterTotal += timing.formatterTotal
+            if timing.usedFormatter {
+                formattedTurnCount += 1
+            }
+        }
+
+        return ConversationRenderingPerformanceReport(
+            experiment: experiment,
+            conversationID: conversationID,
+            conversationTitle: conversationTitle,
+            visibleTurnCount: renderingWindow.visibleCount,
+            formattedTurnCount: formattedTurnCount,
+            turnTimings: turnTimings,
+            markdownParseTotal: markdownParseTotal,
+            attributedStringCreationTotal: attributedTotal,
+            formatterTotal: formatterTotal,
+            viewConstruction: viewConstruction
+        )
+    }
+
     private func renderMarkdown(in indexRange: Range<Int>) {
         for index in indexRange {
             guard conversations.indices.contains(index) else { continue }
-            renderMarkdown(for: conversations[index].id)
+            _ = renderMarkdownMeasured(at: index)
         }
+    }
+
+    @discardableResult
+    private func renderMarkdownMeasured(
+        at index: Int
+    ) -> ConversationRenderingPerformanceReport.TurnTiming {
+        let item = conversations[index]
+        let characterCount = item.assistant.count
+
+        if debugLogService.bypassAssistantMarkdown {
+            conversations[index].renderedAssistant = nil
+            return ConversationRenderingPerformanceReport.TurnTiming(
+                id: item.id,
+                index: index,
+                characterCount: characterCount,
+                usedFormatter: false
+            )
+        }
+
+        guard shouldRenderMarkdown(item.assistant) else {
+            conversations[index].renderedAssistant = nil
+            return ConversationRenderingPerformanceReport.TurnTiming(
+                id: item.id,
+                index: index,
+                characterCount: characterCount,
+                usedFormatter: false
+            )
+        }
+
+        let measured = AssistantResponseFormatter
+            .markdownPreservingWhitespaceMeasured(item.assistant)
+        conversations[index].renderedAssistant = measured.value
+        return ConversationRenderingPerformanceReport.TurnTiming(
+            id: item.id,
+            index: index,
+            characterCount: characterCount,
+            usedFormatter: true,
+            markdownParse: measured.breakdown.markdownParse,
+            attributedStringCreation: measured.breakdown.attributedStringCreation,
+            formatterTotal: measured.breakdown.total
+        )
     }
 
     private func scrollConversationToBottom(
@@ -807,16 +980,7 @@ struct ContentView: View {
             conversations[index].id == conversationID
         else { return }
 
-        let text = conversations[index].assistant
-        guard shouldRenderMarkdown(text) else {
-            conversations[index].renderedAssistant = nil
-            return
-        }
-
-        conversations[index].renderedAssistant =
-            AssistantResponseFormatter.markdownPreservingWhitespace(
-                text
-            )
+        _ = renderMarkdownMeasured(at: index)
     }
 
     private func shouldRenderMarkdown(_ text: String) -> Bool {
@@ -827,6 +991,7 @@ struct ContentView: View {
 #Preview {
     ContentView(
         provider: FakeAIProvider(),
+        debugLogService: DebugLogService(),
         conversationActionState: ConversationActionState()
     )
 }

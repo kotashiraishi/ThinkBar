@@ -13,6 +13,14 @@ struct DebugConsoleView: View {
                         Text("Debug Console")
                             .font(.headline)
                         Spacer()
+                        Toggle(
+                            "Experiment B: Plain assistant text",
+                            isOn: $debugLogService.bypassAssistantMarkdown
+                        )
+                        .toggleStyle(.checkbox)
+                        .help(
+                            "Bypass Markdown/AttributedString and render assistant messages as Text(rawString)."
+                        )
                         Menu("Test Data") {
                             Button("Load Long Conversation Sample") {
                                 debugLogService.loadLongConversationSample()
@@ -36,7 +44,8 @@ struct DebugConsoleView: View {
                                 debugDetails(for: entry)
                             } label: {
                                 VStack(alignment: .leading) {
-                                    if entry.mode == ConversationSwitchPerformanceReport.debugMode {
+                                    if entry.mode == ConversationSwitchPerformanceReport.debugMode
+                                        || entry.mode == ConversationRenderingPerformanceReport.debugMode {
                                         Text(entry.mode)
                                         Text(entry.userMessage)
                                             .font(.caption)
@@ -78,7 +87,8 @@ struct DebugConsoleView: View {
 
     @ViewBuilder
     private func debugDetails(for entry: DebugLogEntry) -> some View {
-        if entry.mode == ConversationSwitchPerformanceReport.debugMode {
+        if entry.mode == ConversationSwitchPerformanceReport.debugMode
+            || entry.mode == ConversationRenderingPerformanceReport.debugMode {
             detail("Timestamp", entry.timestamp.formatted(
                 date: .complete,
                 time: .standard
