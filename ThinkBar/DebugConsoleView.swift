@@ -36,7 +36,14 @@ struct DebugConsoleView: View {
                                 debugDetails(for: entry)
                             } label: {
                                 VStack(alignment: .leading) {
-                                    Text("\(entry.provider) · \(entry.model)")
+                                    if entry.mode == ConversationSwitchPerformanceReport.debugMode {
+                                        Text(entry.mode)
+                                        Text(entry.userMessage)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("\(entry.provider) · \(entry.model)")
+                                    }
                                     Text(entry.timestamp.formatted(
                                         date: .abbreviated,
                                         time: .standard
@@ -71,37 +78,46 @@ struct DebugConsoleView: View {
 
     @ViewBuilder
     private func debugDetails(for entry: DebugLogEntry) -> some View {
-        detail("Timestamp", entry.timestamp.formatted(
-            date: .complete,
-            time: .standard
-        ))
-        detail("Provider", entry.provider)
-        detail("Model", entry.model)
-        detail("Mode", entry.mode)
-        detail("Generated Context", entry.generatedContext)
-        detail("User Message", entry.userMessage)
-        detail("Attachment Context", entry.attachmentContext ?? "None")
-        detail("Conversation Summary", entry.conversationSummary ?? "None")
-        detail("Provider Response", entry.providerResponse)
-        if let statistics = entry.contextStatistics {
-            contextStatistics(
-                entry.conversationSummary == nil
-                    ? "Context without Summary"
-                    : "Context with Summary",
-                statistics
-            )
-        }
-        if let statistics = entry.contextWithoutSummaryStatistics {
-            contextStatistics(
-                "Context without Summary (Full History)",
-                statistics
-            )
-        }
-        if entry.summaryGenerationTriggered {
-            detail("Summary Generation Triggered", "Yes")
-            detail("Previous Summary", entry.previousSummary ?? "None")
-            detail("Generated Summary", entry.generatedSummary ?? "None")
-            detail("Summary Update", entry.summaryUpdateStatus ?? "Unknown")
+        if entry.mode == ConversationSwitchPerformanceReport.debugMode {
+            detail("Timestamp", entry.timestamp.formatted(
+                date: .complete,
+                time: .standard
+            ))
+            detail("Switch", entry.userMessage)
+            detail("Report", entry.providerResponse)
+        } else {
+            detail("Timestamp", entry.timestamp.formatted(
+                date: .complete,
+                time: .standard
+            ))
+            detail("Provider", entry.provider)
+            detail("Model", entry.model)
+            detail("Mode", entry.mode)
+            detail("Generated Context", entry.generatedContext)
+            detail("User Message", entry.userMessage)
+            detail("Attachment Context", entry.attachmentContext ?? "None")
+            detail("Conversation Summary", entry.conversationSummary ?? "None")
+            detail("Provider Response", entry.providerResponse)
+            if let statistics = entry.contextStatistics {
+                contextStatistics(
+                    entry.conversationSummary == nil
+                        ? "Context without Summary"
+                        : "Context with Summary",
+                    statistics
+                )
+            }
+            if let statistics = entry.contextWithoutSummaryStatistics {
+                contextStatistics(
+                    "Context without Summary (Full History)",
+                    statistics
+                )
+            }
+            if entry.summaryGenerationTriggered {
+                detail("Summary Generation Triggered", "Yes")
+                detail("Previous Summary", entry.previousSummary ?? "None")
+                detail("Generated Summary", entry.generatedSummary ?? "None")
+                detail("Summary Update", entry.summaryUpdateStatus ?? "Unknown")
+            }
         }
     }
 

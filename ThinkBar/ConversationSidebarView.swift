@@ -11,7 +11,7 @@ struct ConversationSidebarItem: Identifiable, Hashable {
 struct ConversationSidebarView: View {
     let items: [ConversationSidebarItem]
     let selectedConversationID: UUID?
-    let isInteractionDisabled: Bool
+    let canSelectConversation: Bool
     let canStartNewConversation: Bool
     let onSelect: (UUID) -> Void
     let onNewConversation: () -> Void
@@ -37,12 +37,11 @@ struct ConversationSidebarView: View {
                     .frame(minHeight: 120)
                 } else {
                     ForEach(items) { item in
-                        Text(item.title)
-                            .lineLimit(2)
-                            .fontWeight(item.isActive ? .semibold : .regular)
+                        conversationRow(item)
                             .tag(item.id)
                             .accessibilityAddTraits(item.isActive ? .isSelected : [])
                     }
+                    .disabled(!canSelectConversation)
                 }
             }
         }
@@ -61,11 +60,35 @@ struct ConversationSidebarView: View {
         }
     }
 
+    @ViewBuilder
+    private func conversationRow(_ item: ConversationSidebarItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .lineLimit(2)
+                    .fontWeight(item.isActive ? .semibold : .regular)
+                if item.isActive {
+                    Text("Active")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+            if item.isActive {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.tint)
+                    .imageScale(.small)
+                    .accessibilityHidden(true)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
     private var selectionBinding: Binding<UUID?> {
         Binding(
             get: { selectedConversationID },
             set: { newValue in
-                guard let newValue, !isInteractionDisabled else { return }
+                guard let newValue, canSelectConversation else { return }
                 onSelect(newValue)
             }
         )

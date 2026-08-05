@@ -92,7 +92,7 @@ public struct Conversation: Codable, Equatable, Identifiable, Sendable {
         return Conversation(
             createdAt: createdAt,
             updatedAt: updatedAt,
-            title: provisionalTitle(from: turns),
+            title: ConversationTitleGenerator.title(from: turns),
             turns: turns,
             summary: summaryState.summary,
             summaryCoveredTurnCount: summaryState.coveredCount
@@ -102,19 +102,7 @@ public struct Conversation: Codable, Equatable, Identifiable, Sendable {
     public static func provisionalTitle(
         from turns: [ConversationRecord]
     ) -> String {
-        guard let firstUser = turns.first?.user
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !firstUser.isEmpty
-        else {
-            return "New Conversation"
-        }
-
-        let limit = 40
-        if firstUser.count <= limit {
-            return firstUser
-        }
-        let end = firstUser.index(firstUser.startIndex, offsetBy: limit)
-        return String(firstUser[..<end]) + "…"
+        ConversationTitleGenerator.title(from: turns)
     }
 
     public static func summaryState(
@@ -301,8 +289,8 @@ public struct ConversationStoreSnapshot: Codable, Equatable, Sendable {
             active.summary = resolvedSummary
             active.summaryCoveredTurnCount = resolvedCovered
             active.updatedAt = updatedAt
-            if active.title == "New Conversation" {
-                active.title = Conversation.provisionalTitle(from: turns)
+            if active.title == ConversationTitleGenerator.placeholder {
+                active.title = ConversationTitleGenerator.title(from: turns)
             }
             upsert(active)
             return
@@ -311,12 +299,30 @@ public struct ConversationStoreSnapshot: Codable, Equatable, Sendable {
         let conversation = Conversation(
             createdAt: updatedAt,
             updatedAt: updatedAt,
-            title: Conversation.provisionalTitle(from: turns),
+            title: ConversationTitleGenerator.title(from: turns),
             turns: turns,
             summary: resolvedSummary,
             summaryCoveredTurnCount: resolvedCovered
         )
         upsert(conversation)
+    }
+
+    /// Sets a generated title once, when the active conversation still uses the placeholder.
+    @discardableResult
+    public mutating func assignGeneratedTitleIfNeeded(
+        from turns: [ConversationRecord],
+        updatedAt: Date = Date()
+    ) -> Bool {
+        guard var active = activeConversation else { return false }
+        guard active.title == ConversationTitleGenerator.placeholder else {
+            return false
+        }
+        guard !turns.isEmpty else { return false }
+
+        active.title = ConversationTitleGenerator.title(from: turns)
+        active.updatedAt = updatedAt
+        upsert(active)
+        return true
     }
 }
 
@@ -379,6 +385,14 @@ public struct ConversationStore: Sendable {
     }
 
     public func save(_ snapshot: ConversationStoreSnapshot) throws {
+        _ = try saveMeasuring(snapshot)
+    }
+
+    /// Encodes and writes the snapshot while reporting encode/write durations separately.
+    @discardableResult
+    public func saveMeasuring(
+        _ snapshot: ConversationStoreSnapshot
+    ) throws -> (encode: Duration, write: Duration) {
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -389,8 +403,17 @@ public struct ConversationStore: Sendable {
         if archive.activeConversationID == nil {
             archive.activeConversationID = archive.conversations.first?.id
         }
+
+        let clock = ContinuousClock()
+        let encodeStarted = clock.now
         let data = try encoder.encode(archive)
+        let encodeDuration = clock.now - encodeStarted
+
+        let writeStarted = clock.now
         try data.write(to: fileURL, options: .atomic)
+        let writeDuration = clock.now - writeStarted
+
+        return (encodeDuration, writeDuration)
     }
 
     private func migrateLegacy(

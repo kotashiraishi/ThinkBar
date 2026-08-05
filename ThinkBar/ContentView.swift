@@ -17,6 +17,7 @@ struct ContentView: View {
 
     let conversationStore: ConversationStore
     let conversationRunner: ConversationRunner
+    private let debugLogRecorder: (any DebugLogRecording)?
     @ObservedObject private var conversationActionState: ConversationActionState
 
     init(
@@ -29,6 +30,7 @@ struct ContentView: View {
         conversationActionState: ConversationActionState
     ) {
         self.conversationStore = conversationStore
+        self.debugLogRecorder = debugLogRecorder
         self.conversationRunner = ConversationRunner(
             provider: provider,
             configuration: providerConfiguration,
@@ -44,6 +46,7 @@ struct ContentView: View {
     @State private var attachmentError: String?
     @State private var conversations: [ConversationItem] = []
     @State private var conversationSnapshot = ConversationStoreSnapshot.empty
+    @State private var renderingWindow = ConversationRenderingWindow()
     @State private var isSending = false
     @State private var isThinking = false
     @State private var selectedMode = ConversationMode.general
@@ -55,6 +58,14 @@ struct ContentView: View {
     private enum PendingConversationNavigation: Equatable {
         case select(UUID)
         case newConversation
+    }
+
+    private var visibleConversations: [ConversationItem] {
+        let start = renderingWindow.visibleStartIndex(
+            totalCount: conversations.count
+        )
+        guard start < conversations.count else { return [] }
+        return Array(conversations[start...])
     }
 
     private var sidebarItems: [ConversationSidebarItem] {
@@ -77,7 +88,11 @@ struct ContentView: View {
     }
 
     private var canStartNewConversation: Bool {
-        conversationSnapshot.canStartNewConversation && !isSending
+        conversationSnapshot.canStartNewConversation && canSelectConversation
+    }
+
+    private var canSelectConversation: Bool {
+        !isSending
     }
 
     var body: some View {
@@ -86,7 +101,7 @@ struct ContentView: View {
                 items: sidebarItems,
                 selectedConversationID: conversationSnapshot.activeConversationID
                     ?? conversationSnapshot.activeConversation?.id,
-                isInteractionDisabled: isSending,
+                canSelectConversation: canSelectConversation,
                 canStartNewConversation: canStartNewConversation,
                 onSelect: requestSelectConversation,
                 onNewConversation: requestStartNewConversation
@@ -142,7 +157,7 @@ struct ContentView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(conversations) { conversation in
+                        ForEach(visibleConversations) { conversation in
                             VStack(alignment: .leading) {
                                 HStack {
                                     Text("User")
@@ -203,6 +218,7 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: 8)
                                     .fill(Color.accentColor.opacity(0.08))
                             }
+                            .id(conversation.id)
                         }
 
                         Color.clear
@@ -215,7 +231,20 @@ struct ContentView: View {
                 } action: { _, newValue in
                     isNearBottom = newValue
                 }
-                .onChange(of: conversations.count) {
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    ConversationScrollMetrics.isNearTop(geometry)
+                } action: { _, isNearTop in
+                    if isNearTop {
+                        revealOlderConversations(using: proxy)
+                    }
+                }
+                .onChange(of: conversations.count) { oldCount, newCount in
+                    if abs(newCount - oldCount) == 1 {
+                        renderingWindow.handleTotalCountChange(
+                            from: oldCount,
+                            to: newCount
+                        )
+                    }
                     scrollConversationToBottom(using: proxy, force: true)
                 }
                 .onChange(of: conversations.last?.assistant) {
@@ -262,7 +291,7 @@ struct ContentView: View {
     }
 
     private func requestSelectConversation(_ id: UUID) {
-        guard !isSending else { return }
+        guard canSelectConversation else { return }
         guard id != conversationSnapshot.activeConversation?.id else { return }
 
         let navigation = PendingConversationNavigation.select(id)
@@ -288,7 +317,8 @@ struct ContentView: View {
 
     private func syncConversationActionState() {
         conversationActionState.update(
-            canStartNewConversation: canStartNewConversation
+            canStartNewConversation: canStartNewConversation,
+            canSelectConversation: canSelectConversation
         )
     }
 
@@ -298,31 +328,182 @@ struct ContentView: View {
     ) {
         pendingNavigation = nil
 
+        let stopwatch = ConversationSwitchStopwatch()
+        var timings = ConversationSwitchPerformanceReport.Timings()
         var snapshot = conversationSnapshot
+
+        let sourceID = snapshot.activeConversation?.id
+        let sourceTitle = snapshot.activeConversation?.title
+            ?? ConversationTitleGenerator.placeholder
+        let sourceTurns = snapshot.activeConversation?.turns.count ?? 0
+
+        timings.saveCurrentConversation = stopwatch.measure {
+            snapshot.replaceActiveTurns(conversationRecords())
+        }
+
+        let destinationID: UUID?
         switch navigation {
         case let .select(id):
-            guard snapshot.activateConversation(
-                id: id,
-                persistingActiveTurns: conversationRecords()
-            ) else { return }
+            guard snapshot.conversations.contains(where: { $0.id == id }) else {
+                return
+            }
+            timings.activateConversation = stopwatch.measure {
+                snapshot.selectActiveConversation(id: id)
+            }
+            destinationID = id
         case .newConversation:
-            snapshot.startNewConversation(
-                persistingActiveTurns: conversationRecords()
-            )
+            let (created, activateDuration) = stopwatch.measure { () -> Conversation in
+                // Turns were already persisted above; only create and select.
+                let conversation = Conversation.makeNew()
+                snapshot.upsert(conversation)
+                return conversation
+            }
+            timings.activateConversation = activateDuration
+            destinationID = created.id
         }
+
+        do {
+            let saveTiming = try conversationStore.saveMeasuring(snapshot)
+            timings.encodeSnapshot = saveTiming.encode
+            timings.writeSnapshotFile = saveTiming.write
+        } catch {
+            timings.encodeSnapshot = .zero
+            timings.writeSnapshotFile = .zero
+        }
+
+        let (active, retrieveDuration) = stopwatch.measure {
+            snapshot.activeConversation
+        }
+        timings.retrieveConversation = retrieveDuration
+
         conversationSnapshot = snapshot
-        try? conversationStore.save(snapshot)
-        presentActiveConversation(clearComposer: discardComposer)
+
+        let presentation = presentActiveConversation(
+            clearComposer: discardComposer,
+            turns: active?.turnsForContext ?? [],
+            stopwatch: stopwatch
+        )
+        timings.buildDisplayItems = presentation.buildDisplayItems
+        timings.prepareVisibleTurns = presentation.prepareVisibleTurns
+        timings.uiStateUpdateRequested = presentation.uiStateUpdateRequested
+        timings.total = stopwatch.elapsed()
+
+        let destinationTitle = active?.title
+            ?? ConversationTitleGenerator.placeholder
+        let destinationTurns = active?.turns.count ?? 0
+        let destinationCharacters = (active?.turns ?? []).reduce(into: 0) {
+            count, turn in
+            count += turn.user.count + turn.assistant.count
+        }
+        let totalTurns = snapshot.conversations.reduce(into: 0) {
+            count, conversation in
+            count += conversation.turns.count
+        }
+
+        let report = ConversationSwitchPerformanceReport(
+            sourceConversationID: sourceID,
+            destinationConversationID: destinationID ?? active?.id,
+            sourceTitle: sourceTitle,
+            destinationTitle: destinationTitle,
+            totalConversations: snapshot.conversations.count,
+            totalTurnsInSnapshot: totalTurns,
+            sourceTurns: sourceTurns,
+            destinationTurns: destinationTurns,
+            destinationVisibleTurns: renderingWindow.visibleCount,
+            destinationCharacterCount: destinationCharacters,
+            timings: timings
+        )
+
+        recordSwitchPerformance(report, stopwatch: stopwatch)
     }
 
     private func presentActiveConversation(clearComposer: Bool) {
-        let turns = conversationSnapshot.activeConversation?.turnsForContext ?? []
-        conversations = turns.map(conversationItem(from:))
-        if clearComposer {
-            clearComposerState()
+        _ = presentActiveConversation(
+            clearComposer: clearComposer,
+            turns: conversationSnapshot.activeConversation?.turnsForContext ?? [],
+            stopwatch: nil
+        )
+    }
+
+    private struct PresentationTimings {
+        var buildDisplayItems: Duration = .zero
+        var prepareVisibleTurns: Duration = .zero
+        var uiStateUpdateRequested: Duration = .zero
+    }
+
+    private func presentActiveConversation(
+        clearComposer: Bool,
+        turns: [ConversationRecord],
+        stopwatch: ConversationSwitchStopwatch?
+    ) -> PresentationTimings {
+        var timings = PresentationTimings()
+        let measure = { (work: () -> Void) -> Duration in
+            if let stopwatch {
+                return stopwatch.measure(work)
+            }
+            work()
+            return .zero
         }
-        isNearBottom = true
-        focusInput()
+
+        timings.buildDisplayItems = measure {
+            conversations = turns.map {
+                conversationItem(from: $0, renderMarkdown: false)
+            }
+        }
+        timings.prepareVisibleTurns = measure {
+            renderingWindow.reset(totalCount: conversations.count)
+            renderMarkdownForVisibleConversations()
+        }
+        timings.uiStateUpdateRequested = measure {
+            if clearComposer {
+                clearComposerState()
+            }
+            isNearBottom = true
+            focusInput()
+        }
+        return timings
+    }
+
+    private func recordSwitchPerformance(
+        _ report: ConversationSwitchPerformanceReport,
+        stopwatch: ConversationSwitchStopwatch
+    ) {
+        let recorder = debugLogRecorder
+        Task {
+            guard await recorder?.loggingEnabled() == true else { return }
+            await Task.yield()
+            var finalized = report
+            let firstRenderCompleted = stopwatch.elapsed()
+            finalized.timings.firstRenderCompleted = firstRenderCompleted
+            if firstRenderCompleted > finalized.timings.total {
+                finalized.timings.total = firstRenderCompleted
+            }
+            await recorder?.record(finalized.asDebugLogEntry())
+        }
+    }
+
+    private func revealOlderConversations(using proxy: ScrollViewProxy) {
+        guard renderingWindow.canRevealOlder(totalCount: conversations.count) else {
+            return
+        }
+
+        let anchorID = visibleConversations.first?.id
+        let previousStart = renderingWindow.visibleStartIndex(
+            totalCount: conversations.count
+        )
+        let added = renderingWindow.revealOlder(totalCount: conversations.count)
+        guard added > 0 else { return }
+
+        let newStart = renderingWindow.visibleStartIndex(
+            totalCount: conversations.count
+        )
+        renderMarkdown(in: newStart..<previousStart)
+
+        if let anchorID {
+            DispatchQueue.main.async {
+                proxy.scrollTo(anchorID, anchor: .top)
+            }
+        }
     }
 
     private func clearComposerState() {
@@ -333,10 +514,11 @@ struct ContentView: View {
     }
 
     private func conversationItem(
-        from record: ConversationRecord
+        from record: ConversationRecord,
+        renderMarkdown: Bool
     ) -> ConversationItem {
         let renderedAssistant: AttributedString?
-        if shouldRenderMarkdown(record.assistant) {
+        if renderMarkdown, shouldRenderMarkdown(record.assistant) {
             renderedAssistant =
                 AssistantResponseFormatter.markdownPreservingWhitespace(
                     record.assistant
@@ -355,6 +537,20 @@ struct ContentView: View {
             summaryCoveredConversationCount:
                 record.context?.summaryCoveredConversationCount
         )
+    }
+
+    private func renderMarkdownForVisibleConversations() {
+        let start = renderingWindow.visibleStartIndex(
+            totalCount: conversations.count
+        )
+        renderMarkdown(in: start..<conversations.count)
+    }
+
+    private func renderMarkdown(in indexRange: Range<Int>) {
+        for index in indexRange {
+            guard conversations.indices.contains(index) else { continue }
+            renderMarkdown(for: conversations[index].id)
+        }
     }
 
     private func scrollConversationToBottom(
@@ -387,6 +583,7 @@ struct ContentView: View {
             attachmentContext: attachmentContext
         )
         conversations.append(conversation)
+        assignGeneratedTitleIfNeeded()
         input = ""
         isSending = true
         isThinking = true
@@ -463,6 +660,17 @@ struct ContentView: View {
     private func saveConversations() {
         var snapshot = conversationSnapshot
         snapshot.replaceActiveTurns(conversationRecords())
+        conversationSnapshot = snapshot
+        try? conversationStore.save(snapshot)
+    }
+
+    private func assignGeneratedTitleIfNeeded() {
+        var snapshot = conversationSnapshot
+        guard snapshot.assignGeneratedTitleIfNeeded(
+            from: conversationRecords()
+        ) else {
+            return
+        }
         conversationSnapshot = snapshot
         try? conversationStore.save(snapshot)
     }
